@@ -165,4 +165,5 @@ jobs:
       - name: "Publish client-sdk"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: cd client-sdk && npm publish --access public --tag ${{ github.ref }}
+          NPM_DIST_TAG: ${{ github.event.release.prerelease && 'next' || 'latest' }}
+        run: cd client-sdk && npm publish --access public --tag "${NPM_DIST_TAG}"
