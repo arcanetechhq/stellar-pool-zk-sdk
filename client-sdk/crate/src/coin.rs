@@ -92,9 +92,15 @@ pub struct WithdrawMerkleWitness {
     pub state_siblings: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct StateFile {
     pub commitments: Vec<String>,
+    #[serde(default)]
+    pub nodes: Option<Vec<crate::merkle::LeanImtNode>>,
+    #[serde(default)]
+    pub root: Option<String>,
+    #[serde(default)]
+    pub depth: Option<u32>,
 }
 
 /// Privacy-pool leaf hash (matches `circuits/commitment.circom` `CommitmentHasher`):
@@ -315,19 +321,7 @@ pub fn generate_coin_for_deposit_with_owner_pub_hex(
     ))
 }
 
-/// Build Merkle witness and public path fields for a withdraw from `coin` against `state.commitments`.
-pub fn build_withdraw_merkle_witness(
-    coin: &CoinData,
-    state: &StateFile,
-) -> Result<WithdrawMerkleWitness, String> {
-    let value = decimal_to_fr(&coin.value);
-    let nullifier = decimal_to_fr(&coin.nullifier);
-    let secret = decimal_to_fr(&coin.secret);
-    let commitment = decimal_to_fr(&coin.commitment);
-    let asset_hi = decimal_to_fr(&coin.asset_hi);
-    let asset_lo = decimal_to_fr(&coin.asset_lo);
-
-    // Build merkle tree from state (on-chain tree appends two commitments per transact).
+pub fn lean_imt_from_state(state: &StateFile) -> Result<crate::merkle::LeanIMT, String> {
     let n = state.commitments.len();
     if n % 2 != 0 {
         return Err(format!(
@@ -335,10 +329,15 @@ pub fn build_withdraw_merkle_witness(
             n
         ));
     }
-
-    let mut tree = crate::merkle::LeanIMT::new(TREE_DEPTH);
-    let mut commitment_index: Option<usize> = None;
-
+    if let (Some(nodes), Some(root)) = (&state.nodes, &state.root) {
+        return crate::merkle::LeanIMT::from_snapshot(&crate::merkle::LeanImtSnapshot {
+            depth: state.depth.unwrap_or(TREE_DEPTH),
+            root: root.clone(),
+            leaves: state.commitments.clone(),
+            nodes: nodes.clone(),
+        });
+    }
+    let mut tree = crate::merkle::LeanIMT::new(state.depth.unwrap_or(TREE_DEPTH));
     for pair_start in (0..n).step_by(2) {
         let a = decimal_to_fr(&state.commitments[pair_start]);
         let b = decimal_to_fr(&state.commitments[pair_start + 1]);
@@ -350,23 +349,32 @@ pub fn build_withdraw_merkle_witness(
                 e
             )
         })?;
-
-        if a == commitment {
-            commitment_index = Some(pair_start);
-        } else if b == commitment {
-            commitment_index = Some(pair_start + 1);
-        }
     }
+    Ok(tree)
+}
 
-    let commitment_index =
-        commitment_index.ok_or_else(|| "Commitment not found in state".to_string())?;
+pub fn find_commitment_leaf_index(tree: &crate::merkle::LeanIMT, commitment: Fr) -> Option<usize> {
+    tree.leaves()
+        .iter()
+        .position(|leaf| *leaf == commitment)
+}
 
+pub fn withdraw_merkle_witness_from_tree(
+    coin: &CoinData,
+    tree: &crate::merkle::LeanIMT,
+) -> Result<WithdrawMerkleWitness, String> {
+    let value = decimal_to_fr(&coin.value);
+    let nullifier = decimal_to_fr(&coin.nullifier);
+    let secret = decimal_to_fr(&coin.secret);
+    let commitment = decimal_to_fr(&coin.commitment);
+    let asset_hi = decimal_to_fr(&coin.asset_hi);
+    let asset_lo = decimal_to_fr(&coin.asset_lo);
+    let commitment_index = find_commitment_leaf_index(tree, commitment)
+        .ok_or_else(|| "Commitment not found in state".to_string())?;
     let (siblings, _depth) = tree
         .generate_proof(commitment_index as u32)
         .ok_or_else(|| "Failed to generate merkle proof".to_string())?;
-
     let root = tree.get_root();
-
     Ok(WithdrawMerkleWitness {
         withdrawn_value: coin.value.clone(),
         value: fr_to_decimal(&value),
@@ -377,6 +385,15 @@ pub fn build_withdraw_merkle_witness(
         state_index: commitment_index.to_string(),
         state_siblings: siblings.iter().map(|s| fr_to_decimal(s)).collect(),
     })
+}
+
+/// Build Merkle witness and public path fields for a withdraw from `coin` against `state.commitments`.
+pub fn build_withdraw_merkle_witness(
+    coin: &CoinData,
+    state: &StateFile,
+) -> Result<WithdrawMerkleWitness, String> {
+    let tree = lean_imt_from_state(state)?;
+    withdraw_merkle_witness_from_tree(coin, &tree)
 }
 
 /// Calculate owner-bound nullifier hash: Poseidon(DOM_NULLIFIER, nullifier, privKeyScalar).
@@ -514,6 +531,7 @@ mod tests {
         let other = generate_coin(&(COIN_VALUE + 1).to_string(), az, az, "0").unwrap();
         let state = StateFile {
             commitments: vec![coin.coin.commitment.clone(), other.coin.commitment.clone()],
+            ..StateFile::default()
         };
         let result = build_withdraw_merkle_witness(&coin.coin, &state);
         assert!(result.is_ok());
@@ -522,6 +540,21 @@ mod tests {
         assert_eq!(w.state_siblings.len(), TREE_DEPTH as usize);
         assert_eq!(w.withdrawn_value, w.value);
         assert_eq!(w.value, coin.coin.value);
+        let tree = lean_imt_from_state(&state).unwrap();
+        let snapshot = tree.export_snapshot();
+        let from_snapshot = build_withdraw_merkle_witness(
+            &coin.coin,
+            &StateFile {
+                commitments: snapshot.leaves,
+                nodes: Some(snapshot.nodes),
+                root: Some(snapshot.root),
+                depth: Some(snapshot.depth),
+            },
+        )
+        .unwrap();
+        assert_eq!(from_snapshot.state_root, w.state_root);
+        assert_eq!(from_snapshot.state_siblings, w.state_siblings);
+        assert_eq!(from_snapshot.state_index, w.state_index);
     }
 
     #[test]
@@ -530,6 +563,7 @@ mod tests {
         let coin = generate_coin(&COIN_VALUE.to_string(), az, az, "0").unwrap();
         let state = StateFile {
             commitments: vec!["999".to_string()],
+            ..StateFile::default()
         };
         let result = build_withdraw_merkle_witness(&coin.coin, &state);
         assert!(result.is_err());

@@ -3,6 +3,8 @@ import { resolveCircuitArtifacts } from "./circuit-artifacts";
 import type {
   CoinData,
   GeneratedCoin,
+  LeanImtProof,
+  LeanImtSnapshot,
   SDKOptions,
   StateFile,
   WithdrawMerkleWitness,
@@ -276,6 +278,8 @@ export class PrivacyPoolSDK {
 
   /**
    * Merkle root, path, and coin fields for the first withdraw leg (Rust LeanIMT + Poseidon).
+   * When `state.nodes` and `state.root` are present, WASM restores the sparse cache instead of
+   * inserting every leaf pair.
    */
   buildWithdrawMerkleWitness(
     coin: CoinData,
@@ -288,6 +292,44 @@ export class PrivacyPoolSDK {
       stateJson,
     );
     return JSON.parse(resultJson);
+  }
+
+  importLeanImt(snapshot: LeanImtSnapshot): number {
+    return this.wasm.importLeanImt(JSON.stringify(snapshot));
+  }
+
+  importLeanImtFromState(state: StateFile): number {
+    return this.wasm.importLeanImtFromState(JSON.stringify(state));
+  }
+
+  exportLeanImt(handle: number): LeanImtSnapshot {
+    return JSON.parse(this.wasm.exportLeanImt(handle)) as LeanImtSnapshot;
+  }
+
+  insertTwoLeanImt(handle: number, leafA: string, leafB: string): string {
+    return this.wasm.insertTwoLeanImt(handle, leafA, leafB);
+  }
+
+  generateLeanImtProof(handle: number, leafIndex: number): LeanImtProof {
+    return JSON.parse(
+      this.wasm.generateLeanImtProof(handle, leafIndex),
+    ) as LeanImtProof;
+  }
+
+  buildWithdrawMerkleWitnessFromHandle(
+    coin: CoinData,
+    handle: number,
+  ): WithdrawMerkleWitness {
+    return JSON.parse(
+      this.wasm.buildWithdrawMerkleWitnessFromHandle(
+        JSON.stringify(coin),
+        handle,
+      ),
+    ) as WithdrawMerkleWitness;
+  }
+
+  dropLeanImt(handle: number): void {
+    this.wasm.dropLeanImt(handle);
   }
 
   /**

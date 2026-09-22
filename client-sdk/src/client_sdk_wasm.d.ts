@@ -32,6 +32,20 @@ declare module 'privacy-pool-client-sdk/pkg/client_sdk_wasm.js' {
     application_id_decimal: string,
   ): unknown;
   export function buildWithdrawMerkleWitness(coin_json: string, state_json: string): string;
+  export function importLeanImt(snapshot_json: string): number;
+  export function importLeanImtFromState(state_json: string): number;
+  export function exportLeanImt(handle: number): string;
+  export function insertTwoLeanImt(
+    handle: number,
+    leaf_a_decimal: string,
+    leaf_b_decimal: string,
+  ): string;
+  export function generateLeanImtProof(handle: number, leaf_index: number): string;
+  export function buildWithdrawMerkleWitnessFromHandle(
+    coin_json: string,
+    handle: number,
+  ): string;
+  export function dropLeanImt(handle: number): void;
   export function proofToHex(proof_json: string): string;
   export function proveGroth16(
     graph: Uint8Array,

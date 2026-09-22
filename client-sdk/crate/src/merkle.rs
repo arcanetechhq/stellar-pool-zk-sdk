@@ -1,11 +1,29 @@
 use ark_bn254::Fr;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::poseidon::poseidon_hash_2;
+use crate::utils::{decimal_to_fr_result, fr_to_decimal};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeanImtNode {
+    pub level: u32,
+    pub index: u32,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeanImtSnapshot {
+    pub depth: u32,
+    pub root: String,
+    pub leaves: Vec<String>,
+    pub nodes: Vec<LeanImtNode>,
+}
 
 /// Lean Incremental Merkle Tree - standalone version without Soroban Env.
 /// Same algorithm as libs/lean-imt but using ark Fr directly.
 /// Inserts are always in pairs of leaves (matches on-chain contract).
+#[derive(Debug)]
 pub struct LeanIMT {
     leaves: Vec<Fr>,
     depth: u32,
@@ -53,6 +71,56 @@ impl LeanIMT {
     /// Gets the number of leaves
     pub fn get_leaf_count(&self) -> u32 {
         self.leaves.len() as u32
+    }
+
+    pub fn leaves(&self) -> &[Fr] {
+        &self.leaves
+    }
+
+    pub fn export_snapshot(&self) -> LeanImtSnapshot {
+        let mut nodes: Vec<LeanImtNode> = self
+            .sparse_cache
+            .iter()
+            .map(|((level, index), value)| LeanImtNode {
+                level: *level,
+                index: *index,
+                value: fr_to_decimal(value),
+            })
+            .collect();
+        nodes.sort_by_key(|node| (node.level, node.index));
+        LeanImtSnapshot {
+            depth: self.depth,
+            root: fr_to_decimal(&self.root),
+            leaves: self.leaves.iter().map(fr_to_decimal).collect(),
+            nodes,
+        }
+    }
+
+    pub fn from_snapshot(snapshot: &LeanImtSnapshot) -> Result<Self, String> {
+        if snapshot.leaves.len() % 2 != 0 {
+            return Err(format!(
+                "expected an even number of leaves, got {}",
+                snapshot.leaves.len()
+            ));
+        }
+        let mut tree = Self::new(snapshot.depth);
+        tree.leaves = snapshot
+            .leaves
+            .iter()
+            .map(|leaf| decimal_to_fr_result(leaf))
+            .collect::<Result<Vec<_>, _>>()?;
+        if tree.leaves.len() as u32 > tree.capacity {
+            return Err("snapshot exceeds tree capacity".to_string());
+        }
+        tree.sparse_cache.clear();
+        for node in &snapshot.nodes {
+            tree.sparse_cache.insert(
+                (node.level, node.index),
+                decimal_to_fr_result(&node.value)?,
+            );
+        }
+        tree.root = decimal_to_fr_result(&snapshot.root)?;
+        Ok(tree)
     }
 
     #[inline]
@@ -255,5 +323,32 @@ mod tests {
         let proof1 = tree.generate_proof(1).unwrap();
         assert_eq!(proof0.0.len(), 5);
         assert_eq!(proof1.0.len(), 5);
+    }
+
+    #[test]
+    fn test_snapshot_round_trip_matches_insert_all() {
+        let mut built = LeanIMT::new(5);
+        built.insert_two(Fr::from(1u64), Fr::from(2u64)).unwrap();
+        built.insert_two(Fr::from(3u64), Fr::from(4u64)).unwrap();
+        let snapshot = built.export_snapshot();
+        let restored = LeanIMT::from_snapshot(&snapshot).unwrap();
+        assert_eq!(restored.get_root(), built.get_root());
+        assert_eq!(restored.get_leaf_count(), built.get_leaf_count());
+        let original_proof = built.generate_proof(2).unwrap();
+        let restored_proof = restored.generate_proof(2).unwrap();
+        assert_eq!(original_proof.0, restored_proof.0);
+        assert_eq!(original_proof.1, restored_proof.1);
+    }
+
+    #[test]
+    fn test_from_snapshot_rejects_odd_leaf_count() {
+        let snapshot = LeanImtSnapshot {
+            depth: 5,
+            root: "0".to_string(),
+            leaves: vec!["1".to_string()],
+            nodes: vec![],
+        };
+        let err = LeanIMT::from_snapshot(&snapshot).unwrap_err();
+        assert!(err.contains("even number of leaves"));
     }
 }

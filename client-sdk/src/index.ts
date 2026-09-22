@@ -3,6 +3,9 @@ export { generateWitness } from "./witness";
 export type {
   CoinData,
   GeneratedCoin,
+  LeanImtNode,
+  LeanImtProof,
+  LeanImtSnapshot,
   SDKOptions,
   StateFile,
   WithdrawMerkleWitness,

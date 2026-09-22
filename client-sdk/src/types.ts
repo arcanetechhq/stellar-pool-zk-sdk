@@ -46,6 +46,28 @@ export interface WithdrawMerkleWitness {
 
 export interface StateFile {
   commitments: string[];
+  nodes?: LeanImtNode[];
+  root?: string;
+  depth?: number;
+}
+
+export interface LeanImtNode {
+  level: number;
+  index: number;
+  value: string;
+}
+
+export interface LeanImtSnapshot {
+  depth: number;
+  root: string;
+  leaves: string[];
+  nodes: LeanImtNode[];
+}
+
+export interface LeanImtProof {
+  root: string;
+  depth: number;
+  siblings: string[];
 }
 
 export interface WithdrawResult {

@@ -17,6 +17,13 @@ pub use cryptography::{
 use wasm_bindgen::prelude::*;
 
 use crate::utils::decimal_to_fr_result;
+use std::collections::HashMap;
+use std::sync::atomic::AtomicU32;
+use std::sync::{LazyLock, Mutex};
+
+static TREES: LazyLock<Mutex<HashMap<u32, merkle::LeanIMT>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static NEXT_TREE_ID: AtomicU32 = AtomicU32::new(1);
 
 /// Generate a new coin with random nullifier, secret, and owner public-key field elements.
 /// `amount_decimal` is an arbitrary-precision decimal field element (never JS `number`).
@@ -129,6 +136,124 @@ pub fn build_withdraw_merkle_witness_js(
             e
         ))
     })
+}
+
+fn lock_trees() -> Result<
+    std::sync::MutexGuard<'static, std::collections::HashMap<u32, merkle::LeanIMT>>,
+    JsValue,
+> {
+    TREES
+        .lock()
+        .map_err(|_| JsValue::from_str("lean imt registry poisoned"))
+}
+
+fn insert_tree(tree: merkle::LeanIMT) -> Result<u32, JsValue> {
+    let handle = NEXT_TREE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    lock_trees()?.insert(handle, tree);
+    Ok(handle)
+}
+
+/// Import a LeanIMT snapshot and return a session handle.
+#[wasm_bindgen(js_name = "importLeanImt")]
+pub fn import_lean_imt_js(snapshot_json: &str) -> Result<u32, JsValue> {
+    let snapshot: merkle::LeanImtSnapshot = serde_json::from_str(snapshot_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid LeanIMT snapshot JSON: {}", e)))?;
+    let tree =
+        merkle::LeanIMT::from_snapshot(&snapshot).map_err(|e| JsValue::from_str(&e))?;
+    insert_tree(tree)
+}
+
+/// Import commitments (and optional nodes) as a LeanIMT session handle.
+#[wasm_bindgen(js_name = "importLeanImtFromState")]
+pub fn import_lean_imt_from_state_js(state_json: &str) -> Result<u32, JsValue> {
+    let state: coin::StateFile = serde_json::from_str(state_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid state JSON: {}", e)))?;
+    let tree = coin::lean_imt_from_state(&state).map_err(|e| JsValue::from_str(&e))?;
+    insert_tree(tree)
+}
+
+/// Export the session LeanIMT as a snapshot JSON object.
+#[wasm_bindgen(js_name = "exportLeanImt")]
+pub fn export_lean_imt_js(handle: u32) -> Result<String, JsValue> {
+    let trees = lock_trees()?;
+    let tree = trees
+        .get(&handle)
+        .ok_or_else(|| JsValue::from_str("unknown LeanIMT handle"))?;
+    serde_json::to_string(&tree.export_snapshot()).map_err(|e| JsValue::from_str(&format!("{e}")))
+}
+
+/// Append two decimal-Fr leaves to a session LeanIMT. Returns the new root as a decimal string.
+#[wasm_bindgen(js_name = "insertTwoLeanImt")]
+pub fn insert_two_lean_imt_js(
+    handle: u32,
+    leaf_a_decimal: &str,
+    leaf_b_decimal: &str,
+) -> Result<String, JsValue> {
+    let a = decimal_to_fr_result(leaf_a_decimal).map_err(|e| JsValue::from_str(&e))?;
+    let b = decimal_to_fr_result(leaf_b_decimal).map_err(|e| JsValue::from_str(&e))?;
+    let mut trees = lock_trees()?;
+    let tree = trees
+        .get_mut(&handle)
+        .ok_or_else(|| JsValue::from_str("unknown LeanIMT handle"))?;
+    tree.insert_two(a, b)
+        .map_err(|e| JsValue::from_str(e))?;
+    Ok(crate::utils::fr_to_decimal(&tree.get_root()))
+}
+
+/// Generate siblings for `leaf_index` on a session LeanIMT.
+#[wasm_bindgen(js_name = "generateLeanImtProof")]
+pub fn generate_lean_imt_proof_js(handle: u32, leaf_index: u32) -> Result<String, JsValue> {
+    let trees = lock_trees()?;
+    let tree = trees
+        .get(&handle)
+        .ok_or_else(|| JsValue::from_str("unknown LeanIMT handle"))?;
+    let (siblings, depth) = tree
+        .generate_proof(leaf_index)
+        .ok_or_else(|| JsValue::from_str("Failed to generate merkle proof"))?;
+    #[derive(serde::Serialize)]
+    struct Out {
+        root: String,
+        depth: u32,
+        siblings: Vec<String>,
+    }
+    serde_json::to_string(&Out {
+        root: crate::utils::fr_to_decimal(&tree.get_root()),
+        depth,
+        siblings: siblings
+            .iter()
+            .map(crate::utils::fr_to_decimal)
+            .collect(),
+    })
+    .map_err(|e| JsValue::from_str(&format!("{e}")))
+}
+
+/// Build a withdraw merkle witness against a session LeanIMT.
+#[wasm_bindgen(js_name = "buildWithdrawMerkleWitnessFromHandle")]
+pub fn build_withdraw_merkle_witness_from_handle_js(
+    coin_json: &str,
+    handle: u32,
+) -> Result<String, JsValue> {
+    let coin: coin::CoinData = serde_json::from_str(coin_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid coin JSON: {}", e)))?;
+    let trees = lock_trees()?;
+    let tree = trees
+        .get(&handle)
+        .ok_or_else(|| JsValue::from_str("unknown LeanIMT handle"))?;
+    let witness = coin::withdraw_merkle_witness_from_tree(&coin, tree)
+        .map_err(|e| JsValue::from_str(&e))?;
+    serde_json::to_string(&witness).map_err(|e| {
+        JsValue::from_str(&format!(
+            "Failed to serialize withdraw merkle witness: {}",
+            e
+        ))
+    })
+}
+
+/// Drop a session LeanIMT handle.
+#[wasm_bindgen(js_name = "dropLeanImt")]
+pub fn drop_lean_imt_js(handle: u32) -> Result<(), JsValue> {
+    lock_trees()?.remove(&handle);
+    Ok(())
 }
 
 /// Convert snarkjs proof JSON to hex bytes for Soroban contract.
