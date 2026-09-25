@@ -19,7 +19,11 @@ jobs:
           lfs: false
           token: ${{ secrets.SUBMODULE_PAT }}
       - name: Init contracts submodule
-        run: git submodule update --init --depth 1 -- soroban-privacy-pools
+        run: |
+          set -euo pipefail
+          git config --local url."https://github.com/".insteadOf "git@github.com:"
+          git config --local url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git submodule update --init --depth 1 -- soroban-privacy-pools
       - name: Fetch Hermez ptau
         run: |
           set -euo pipefail
