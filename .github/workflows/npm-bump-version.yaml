@@ -11,6 +11,7 @@ on:
       - "hermez-ptau"
       - "shapes.json"
       - "scripts/generate-circuit-main.sh"
+      - "scripts/build-shape.sh"
       - ".gitmodules"
       - "soroban-privacy-pools"
       - ".github/workflows/npm-bump-version.yaml"

@@ -49,7 +49,14 @@ make -C "$POOLS" keygen \
 
 # circom-witness-rs only passes CIRCOMLIB as -l. Put the generated main next to
 # pool templates so `include "transaction.circom"` resolves.
+# `make witness-graph` copies STEM=main into a temp dir (circom reserves `main`),
+# which drops those sibling includes — compile it as pool_2x2 and rename the graph.
 witness_src="$POOLS/circuits/${stem}.circom"
+graph_stem="$stem"
+if [[ "$stem" == "main" ]]; then
+  witness_src="$POOLS/circuits/pool_2x2.circom"
+  graph_stem="pool_2x2"
+fi
 if [[ "$witness_src" != "$out" ]]; then
   cp "$out" "$witness_src"
   cleanup_witness_src=1
@@ -62,7 +69,11 @@ make -C "$POOLS" witness-graph \
   MAIN_CIRCOM="$witness_src" \
   CIRCOM_INCLUDE="$POOLS/circuits" \
   OUTPUT_DIR="$OUTPUT_DIR" \
-  STEM="$stem"
+  STEM="$graph_stem"
+
+if [[ "$graph_stem" != "$stem" && -f "$OUTPUT_DIR/${graph_stem}.graph.bin" ]]; then
+  mv "$OUTPUT_DIR/${graph_stem}.graph.bin" "$OUTPUT_DIR/${stem}.graph.bin"
+fi
 
 if [[ "$cleanup_witness_src" -eq 1 ]]; then
   rm -f "$witness_src"
