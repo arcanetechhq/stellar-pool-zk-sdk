@@ -18,19 +18,15 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      GIT_LFS_SKIP_SMUDGE: "1"
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.ref }}
-          submodules: false
+          submodules: true
           lfs: false
           token: ${{ secrets.SUBMODULE_PAT }}
-      - name: Init contracts submodule
-        run: |
-          set -euo pipefail
-          git config -f .gitmodules submodule.soroban-privacy-pools.url https://github.com/Polynom-Labs/stellar-privacy-layer-contracts.git
-          git submodule sync -- soroban-privacy-pools
-          git submodule update --init --depth 1 -- soroban-privacy-pools
       - uses: actions/setup-node@v4
         with:
           node-version: "20.x"

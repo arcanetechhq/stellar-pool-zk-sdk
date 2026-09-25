@@ -11,19 +11,15 @@ jobs:
       id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    env:
+      GIT_LFS_SKIP_SMUDGE: "1"
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.ref }}
-          submodules: false
+          submodules: true
           lfs: false
           token: ${{ secrets.SUBMODULE_PAT }}
-      - name: Init contracts submodule
-        run: |
-          set -euo pipefail
-          git config -f .gitmodules submodule.soroban-privacy-pools.url https://github.com/Polynom-Labs/stellar-privacy-layer-contracts.git
-          git submodule sync -- soroban-privacy-pools
-          git submodule update --init --depth 1 -- soroban-privacy-pools
       - name: Fetch Hermez ptau
         run: |
           set -euo pipefail
