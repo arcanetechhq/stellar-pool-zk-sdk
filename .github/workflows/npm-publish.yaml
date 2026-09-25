@@ -3,6 +3,12 @@ name: NPM Package publish
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release whose proving artifacts should be published (skips keygen when present)
+        required: false
+        default: ""
 
 jobs:
   publish-npm:
@@ -13,6 +19,7 @@ jobs:
     timeout-minutes: 360
     env:
       GIT_LFS_SKIP_SMUDGE: "1"
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -67,6 +74,42 @@ jobs:
           if [[ "$missing" -ne 0 ]]; then
             exit 1
           fi
+      - name: Restore proving artifacts from GitHub release
+        id: restore-artifacts
+        if: steps.zk-artifacts.outputs.publish_artifacts == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG:-}"
+          mkdir -p artifacts
+          if [[ -n "$tag" ]]; then
+            count="$(gh release view "$tag" --json assets --jq '.assets | length')"
+            if [[ "${count:-0}" -gt 0 ]]; then
+              gh release download "$tag" --dir artifacts --clobber
+            else
+              echo "release $tag has no assets yet; skip restore"
+            fi
+          else
+            echo "no release tag; skip restore"
+          fi
+          rebuild="${{ steps.zk-artifacts.outputs.rebuild_stems }}"
+          IFS=',' read -r -a wanted <<< "$rebuild"
+          missing=0
+          for stem in "${wanted[@]}"; do
+            [[ -n "$stem" ]] || continue
+            for name in "${stem}.graph.bin" "${stem}.r1cs.gz" "${stem}_proving_key.bin" "${stem}_verification_key.json"; do
+              if [[ ! -f "artifacts/${name}" ]]; then
+                missing=1
+              fi
+            done
+          done
+          if [[ "$missing" -eq 0 && -n "$rebuild" ]]; then
+            echo "need_keygen=false" >> "$GITHUB_OUTPUT"
+            echo "all rebuilt stem artifacts already present; skip keygen"
+          else
+            echo "need_keygen=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-node@v6
         with:
           node-version: "24.x"
@@ -78,23 +121,23 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Install circom
-        if: steps.zk-artifacts.outputs.rebuild == 'true'
+        if: steps.restore-artifacts.outputs.need_keygen == 'true'
         run: |
           cargo install --git https://github.com/iden3/circom.git
           circom --version
       - name: Install JS deps for circuit keygen
-        if: steps.zk-artifacts.outputs.rebuild == 'true'
+        if: steps.restore-artifacts.outputs.need_keygen == 'true'
         run: |
           npm i --no-frozen-lockfile --prefix soroban-privacy-pools
           npm i --no-save --prefix soroban-privacy-pools snarkjs
       - name: Add npm binaries to PATH
-        if: steps.zk-artifacts.outputs.rebuild == 'true'
+        if: steps.restore-artifacts.outputs.need_keygen == 'true'
         run: echo "${{ github.workspace }}/soroban-privacy-pools/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Install C++ deps for witness graphs
-        if: steps.zk-artifacts.outputs.rebuild == 'true'
+        if: steps.restore-artifacts.outputs.need_keygen == 'true'
         run: sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev
       - name: Build changed shapes
-        if: steps.zk-artifacts.outputs.rebuild == 'true'
+        if: steps.restore-artifacts.outputs.need_keygen == 'true'
         env:
           NODE_OPTIONS: --max-old-space-size=6144
           PTAU_PATH: ${{ github.workspace }}/hermez-ptau/powersOfTau28_hez_final_21.ptau
@@ -117,7 +160,7 @@ jobs:
         if: steps.zk-artifacts.outputs.publish_artifacts == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: scripts/upload-zk-release-assets.sh "${{ github.event.release.tag_name }}"
+        run: scripts/upload-zk-release-assets.sh "${RELEASE_TAG}"
       - name: Upload proving artifacts to DigitalOcean Spaces
         if: steps.zk-artifacts.outputs.publish_artifacts == 'true'
         env:
@@ -171,5 +214,12 @@ jobs:
       - name: "Publish client-sdk"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_DIST_TAG: ${{ github.event.release.prerelease && 'next' || 'latest' }}
-        run: cd client-sdk && npm publish --access public --tag "${NPM_DIST_TAG}"
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import json; print(json.load(open("client-sdk/package.json"))["version"])')"
+          if [[ "$version" == *-* ]]; then
+            tag=next
+          else
+            tag=latest
+          fi
+          cd client-sdk && npm publish --access public --tag "$tag"
