@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 POOLS="${POOLS_DIR:-$ROOT/soroban-privacy-pools}"
-PTAU_PATH="${PTAU_PATH:-$ROOT/ptau/pot20_final.ptau}"
+PTAU_PATH="${PTAU_PATH:-$ROOT/hermez-ptau/powersOfTau28_hez_final_21.ptau}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT/artifacts}"
 BUILD_DIR="${BUILD_DIR:-$ROOT/build}"
 GENERATED_DIR="${GENERATED_DIR:-$ROOT/generated}"

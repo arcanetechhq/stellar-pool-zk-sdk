@@ -13,7 +13,7 @@ npm package: [`@arcanetech/stellar-privacy-pool-zk-sdk`](https://www.npmjs.com/p
 | `client-sdk/` | TypeScript SDK + `client-sdk-cli` |
 | `shapes.json` | Catalog of published forms (direct + delegated) |
 | `scripts/generate-circuit-main.sh` | Writes a gitignored `generated/*.circom` main |
-| `ptau/pot20_final.ptau` | Production Powers of Tau (Git LFS). Do not regenerate. |
+| `hermez-ptau/` | Submodule pin to the public Hermez Powers of Tau (`powersOfTau28_hez_final_21.ptau`). CI materializes only that file. |
 | `soroban-privacy-pools/` | Submodule pin to an audited contracts commit |
 | `demo.sh`, `demo_noninteractive.sh` | End-to-end flows that call `client-sdk-cli` |
 
@@ -23,6 +23,8 @@ npm package: [`@arcanetech/stellar-privacy-pool-zk-sdk`](https://www.npmjs.com/p
 git submodule update --init
 cd client-sdk && npm i && npm run build
 ```
+
+`hermez-ptau` uses `update = none`, so a plain `git submodule update --init` does not clone it. Release CI fetches only `powersOfTau28_hez_final_21.ptau` via `scripts/fetch-hermez-ptau.sh`. Local keygen can point `PTAU_PATH` at that file after the same script, or at a leftover `ptau/pot20_final.ptau`.
 
 Wasm crate path dependencies point at the submodule:
 
@@ -38,7 +40,7 @@ r1cs-compact = { path = "../../soroban-privacy-pools/libs/r1cs-compact" }
 make -C soroban-privacy-pools keygen \
   MAIN_CIRCOM=$PWD/generated/main.circom \
   CIRCOM_INCLUDE=$PWD/soroban-privacy-pools/circuits \
-  PTAU_PATH=$PWD/ptau/pot20_final.ptau \
+  PTAU_PATH=$PWD/hermez-ptau/powersOfTau28_hez_final_21.ptau \
   OUTPUT_DIR=$PWD/artifacts
 ```
 

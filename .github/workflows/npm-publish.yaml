@@ -15,11 +15,16 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.ref }}
-          submodules: true
-          lfs: true
+          submodules: false
+          lfs: false
           token: ${{ secrets.SUBMODULE_PAT }}
-      - name: Materialize Git LFS objects
-        run: git lfs pull
+      - name: Init contracts submodule
+        run: git submodule update --init --depth 1 -- soroban-privacy-pools
+      - name: Fetch Hermez ptau
+        run: |
+          set -euo pipefail
+          chmod +x scripts/*.sh
+          scripts/fetch-hermez-ptau.sh
       - name: Check CDN origin
         env:
           ZK_ARTIFACT_CDN_ORIGIN: ${{ vars.ZK_ARTIFACT_CDN_ORIGIN }}
@@ -36,6 +41,7 @@ jobs:
           DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
           DO_SPACES_REGION: ${{ vars.DO_SPACES_REGION }}
           ZK_BOOTSTRAP_FROM_VERSION: "0.10.0"
+          PTAU_PATH: ${{ github.workspace }}/hermez-ptau/powersOfTau28_hez_final_21.ptau
         run: |
           set -euo pipefail
           chmod +x scripts/*.sh
@@ -91,7 +97,7 @@ jobs:
         if: steps.zk-artifacts.outputs.rebuild == 'true'
         env:
           NODE_OPTIONS: --max-old-space-size=6144
-          PTAU_PATH: ${{ github.workspace }}/ptau/pot20_final.ptau
+          PTAU_PATH: ${{ github.workspace }}/hermez-ptau/powersOfTau28_hez_final_21.ptau
           OUTPUT_DIR: ${{ github.workspace }}/artifacts
           POOLS_DIR: ${{ github.workspace }}/soroban-privacy-pools
         run: |

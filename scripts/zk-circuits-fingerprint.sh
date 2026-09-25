@@ -5,7 +5,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 POOLS="${POOLS_DIR:-$ROOT/soroban-privacy-pools}"
-PTAU_PATH="${PTAU_PATH:-$ROOT/ptau/pot20_final.ptau}"
+PTAU_PATH="${PTAU_PATH:-$ROOT/hermez-ptau/powersOfTau28_hez_final_21.ptau}"
 SHAPES_JSON="${SHAPES_JSON:-$ROOT/shapes.json}"
 SHAPE_ID="${1:-}"
 KIND="${2:-direct}"
@@ -36,7 +36,7 @@ trap 'rm -f "$tmp" "$generated"' EXIT
 {
   printf 'shape %s kind %s\n' "$SHAPE_ID" "$KIND"
   # Canonical ptau id — never include the absolute path (CI vs local would rebuild every stem).
-  printf 'ptau %s ptau/pot20_final.ptau\n' "$(hash_file "$PTAU_PATH")"
+  printf 'ptau %s hermez-ptau/powersOfTau28_hez_final_21.ptau\n' "$(hash_file "$PTAU_PATH")"
   printf 'generated %s\n' "$(hash_file "$generated")"
   if [[ "$KIND" == "delegated" ]]; then
     list=(

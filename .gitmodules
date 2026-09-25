@@ -1,3 +1,7 @@
 [submodule "soroban-privacy-pools"]
 	path = soroban-privacy-pools
 	url = git@github.com:Polynom-Labs/stellar-privacy-layer-contracts.git
+[submodule "hermez-ptau"]
+	path = hermez-ptau
+	url = https://github.com/aptos-labs/devnet-groth16-keys.git
+	update = none

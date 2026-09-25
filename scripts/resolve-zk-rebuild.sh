@@ -96,7 +96,7 @@ for line in stems.splitlines():
     prev_fp = previous.get("fingerprint")
     prev_ver = previous.get("version")
     published = isinstance(prev_ver, str) and bool(prev_ver.strip())
-    if published and prev_fp == fingerprint:
+    if published and prev_fp == fingerprint and stem not in force_rebuild:
         mapping[stem] = {
             "version": prev_ver.strip().lstrip("v"),
             "fingerprint": fingerprint,
@@ -105,22 +105,7 @@ for line in stems.splitlines():
             "rebuild": False,
         }
         print(f"keep {stem} version={mapping[stem]['version']} (fingerprint match)", file=sys.stderr)
-    elif published and stem not in force_rebuild:
-        # Already on CDN (e.g. 2x2/6x6 at 0.10.0). Never regenerate proving keys
-        # because the fingerprint string changed (path-stable hash, etc.).
-        mapping[stem] = {
-            "version": prev_ver.strip().lstrip("v"),
-            "fingerprint": fingerprint,
-            "kind": kind,
-            "shapeId": shape_id,
-            "rebuild": False,
-        }
-        print(
-            f"keep {stem} version={mapping[stem]['version']} "
-            f"(already published; fingerprint refresh only)",
-            file=sys.stderr,
-        )
-    elif manifest_empty and object_exists(stem, bootstrap_ver):
+    elif manifest_empty and object_exists(stem, bootstrap_ver) and stem not in force_rebuild:
         mapping[stem] = {
             "version": bootstrap_ver,
             "fingerprint": fingerprint,
