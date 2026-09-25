@@ -28,8 +28,8 @@ jobs:
       - name: Init contracts submodule
         run: |
           set -euo pipefail
-          git config --local url."https://github.com/".insteadOf "git@github.com:"
-          git config --local url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git config -f .gitmodules submodule.soroban-privacy-pools.url https://github.com/Polynom-Labs/stellar-privacy-layer-contracts.git
+          git submodule sync -- soroban-privacy-pools
           git submodule update --init --depth 1 -- soroban-privacy-pools
       - uses: actions/setup-node@v4
         with:
