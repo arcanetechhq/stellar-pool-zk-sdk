@@ -1,7 +1,10 @@
 import { StrKey } from '@stellar/stellar-sdk';
 import { generateRandomScalarHex32 } from './ephemeral-key';
 import { decodeStealthAddress } from './stealth-address';
-import { canonicalBabyJubScalarFromInteger } from './domain-separators';
+import {
+  canonicalBabyJubScalarFromInteger,
+  reduceDerivedEscrowSpendScalar,
+} from './domain-separators';
 import type { TransactionAuditParams } from './transaction-audit';
 import { resolveSlotApplicationIds } from './transaction-audit';
 import type { WithdrawMerkleWitness } from './types';
@@ -405,6 +408,43 @@ export function withdrawObjectFromMerkleWitness(
   applicationId: string,
   privKeyScalar: string,
 ): WithdrawObject {
+  return buildWithdrawObject(witness, ownerPubHex, applicationId, {
+    privKeyScalar,
+    escrowNonce: '0',
+    recipientStellar: ['0', '0'],
+  });
+}
+
+/**
+ * Escrow sweep withdraw leg: witness spend scalar is the derived escrow scalar
+ * reduced modulo the BabyJubJub subgroup order.
+ */
+export function withdrawObjectFromEscrowMerkleWitness(
+  witness: WithdrawMerkleWitness,
+  ownerPubHex: { x: string; y: string },
+  applicationId: string,
+  derivedScalarHex: string,
+  escrow: { nonce: string; recipientHi: string; recipientLo: string },
+): WithdrawObject {
+  const derived = BigInt(`0x${normalizeHex(derivedScalarHex)}`);
+  const reduced = reduceDerivedEscrowSpendScalar(derived);
+  return buildWithdrawObject(witness, ownerPubHex, applicationId, {
+    privKeyScalar: reduced.toString(10),
+    escrowNonce: escrow.nonce,
+    recipientStellar: [escrow.recipientHi, escrow.recipientLo],
+  });
+}
+
+function buildWithdrawObject(
+  witness: WithdrawMerkleWitness,
+  ownerPubHex: { x: string; y: string },
+  applicationId: string,
+  spend: {
+    privKeyScalar: string;
+    escrowNonce: string;
+    recipientStellar: [string, string];
+  },
+): WithdrawObject {
   return {
     value: witness.value,
     nullifier: witness.nullifier,
@@ -412,10 +452,10 @@ export function withdrawObjectFromMerkleWitness(
     asset: witness.withdrawnAsset,
     applicationId,
     ownerPub: [coordHexToDecimal(ownerPubHex.x), coordHexToDecimal(ownerPubHex.y)],
-    privKeyScalar,
+    privKeyScalar: spend.privKeyScalar,
     paddingRandom: randomFrDecimal(),
-    escrowNonce: '0',
-    recipientStellar: ['0', '0'],
+    escrowNonce: spend.escrowNonce,
+    recipientStellar: spend.recipientStellar,
     stateSiblings: witness.stateSiblings,
     stateIndex: witness.stateIndex,
   };

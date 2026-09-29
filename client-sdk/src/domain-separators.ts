@@ -22,3 +22,11 @@ export function canonicalBabyJubScalarFromInteger(value: bigint): bigint {
   }
   return (value % (BABYJUB_SUBGROUP_ORDER - 1n)) + 1n;
 }
+
+/**
+ * Escrow sweep spend scalar: reduce the raw derived escrow field element
+ * modulo the BabyJubJub subgroup order so it satisfies `LessThan(l)`.
+ */
+export function reduceDerivedEscrowSpendScalar(derived: bigint): bigint {
+  return derived % BABYJUB_SUBGROUP_ORDER;
+}
