@@ -17,8 +17,10 @@ const wasmBinaryPath = join(root, 'pkg/client_sdk_wasm_bg.wasm');
 
 const {
   decryptOutputNoteEvent,
+  decryptNoteAuditSlot,
   encryptOutputNoteForDeposit,
   encryptNoteAuditSlot,
+  encodeCiphertextBlob,
   secretFromDepositEphemeralScalarDecimal,
   scalarHexToFrDecimal,
   coordHexToDecimal,
@@ -173,18 +175,201 @@ await assert.rejects(
   /tag verification failed|commitment checksum mismatch/,
 );
 
+const auditPublicKey = [
+  coordHexToDecimal(recipientPoint.x),
+  coordHexToDecimal(recipientPoint.y),
+];
+const auditEphemeralScalar = scalarHexToFrDecimal(depositorScalarHex);
+
 const auditPlaintext = Array.from({ length: 12 }, (_unused, index) => String(index + 1));
 const auditEncrypted = await encryptNoteAuditSlot({
   plaintext: auditPlaintext,
-  auditPublicKey: [
-    coordHexToDecimal(recipientPoint.x),
-    coordHexToDecimal(recipientPoint.y),
-  ],
-  auditEphemeralScalar: scalarHexToFrDecimal(depositorScalarHex),
+  auditPublicKey,
+  auditEphemeralScalar,
+  slotIndex: 0,
   ecdhShared,
 });
 assert.equal(auditEncrypted.ciphertext.length, 12);
 assert.notEqual(auditEncrypted.tag, '0');
 assert.notEqual(auditEncrypted.ciphertext[0], '1');
+
+const realAuditPlaintext = [
+  '0',
+  '1000',
+  '11',
+  '12',
+  '501',
+  '502',
+  '601',
+  '602',
+  '101',
+  '701',
+  '702',
+  '0',
+];
+const paddingAuditPlaintext = [
+  '1',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+];
+const realEncrypted = await encryptNoteAuditSlot({
+  plaintext: realAuditPlaintext,
+  auditPublicKey,
+  auditEphemeralScalar,
+  slotIndex: 0,
+  ecdhShared,
+});
+const paddingEncrypted = await encryptNoteAuditSlot({
+  plaintext: paddingAuditPlaintext,
+  auditPublicKey,
+  auditEphemeralScalar,
+  slotIndex: 1,
+  ecdhShared,
+});
+const slotPlaintexts = [
+  { slotIndex: 0, plaintext: realAuditPlaintext, ciphertext: realEncrypted.ciphertext },
+  { slotIndex: 1, plaintext: paddingAuditPlaintext, ciphertext: paddingEncrypted.ciphertext },
+];
+const secondRealPlaintext = [
+  '0',
+  '2500',
+  '21',
+  '22',
+  '902',
+  '511',
+  '611',
+  '612',
+  '102',
+  '711',
+  '712',
+  '0',
+];
+const secondPaddingPlaintext = [
+  '1',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+  '0',
+];
+const secondRealEncrypted = await encryptNoteAuditSlot({
+  plaintext: secondRealPlaintext,
+  auditPublicKey,
+  auditEphemeralScalar,
+  slotIndex: 2,
+  ecdhShared,
+});
+const secondPaddingEncrypted = await encryptNoteAuditSlot({
+  plaintext: secondPaddingPlaintext,
+  auditPublicKey,
+  auditEphemeralScalar,
+  slotIndex: 3,
+  ecdhShared,
+});
+slotPlaintexts.push(
+  { slotIndex: 2, plaintext: secondRealPlaintext, ciphertext: secondRealEncrypted.ciphertext },
+  {
+    slotIndex: 3,
+    plaintext: secondPaddingPlaintext,
+    ciphertext: secondPaddingEncrypted.ciphertext,
+  },
+);
+for (let left = 0; left < slotPlaintexts.length; left += 1) {
+  for (let right = left + 1; right < slotPlaintexts.length; right += 1) {
+    const leftSlot = slotPlaintexts[left];
+    const rightSlot = slotPlaintexts[right];
+    for (let index = 0; index < 12; index += 1) {
+      const cipherDiff =
+        (((BigInt(leftSlot.ciphertext[index]) - BigInt(rightSlot.ciphertext[index])) %
+          FR_MODULUS) +
+          FR_MODULUS) %
+        FR_MODULUS;
+      const plainDiff =
+        (((BigInt(leftSlot.plaintext[index]) - BigInt(rightSlot.plaintext[index])) %
+          FR_MODULUS) +
+          FR_MODULUS) %
+        FR_MODULUS;
+      assert.notEqual(
+        cipherDiff,
+        plainDiff,
+        `audit slots ${String(leftSlot.slotIndex)} and ${String(rightSlot.slotIndex)} must not share a keystream at field ${String(index)}`,
+      );
+    }
+  }
+}
+
+const roundTrip = await decryptNoteAuditSlot({
+  ciphertext: realEncrypted.ciphertext.map((field) => frDecimalToHex(field)),
+  tag: frDecimalToHex(realEncrypted.tag),
+  auditPublicKey,
+  auditEphemeralScalar,
+  slotIndex: 0,
+  ecdhShared,
+});
+assert.deepEqual(roundTrip.plaintext, realAuditPlaintext);
+
+await assert.rejects(
+  () =>
+    decryptNoteAuditSlot({
+      ciphertext: realEncrypted.ciphertext.map((field) => frDecimalToHex(field)),
+      tag: frDecimalToHex(realEncrypted.tag),
+      auditPublicKey,
+      auditEphemeralScalar,
+      slotIndex: 1,
+      ecdhShared,
+    }),
+  /tag verification failed/,
+);
+
+const knownAnswer = JSON.parse(
+  readFileSync(join(root, 'test/fixtures/audit-slot-keystream-known-answer.json'), 'utf8'),
+);
+
+const reproducedCiphertexts = [];
+const reproducedTags = [];
+for (const slot of knownAnswer.slots) {
+  const encrypted = await encryptNoteAuditSlot({
+    plaintext: slot.plaintext,
+    auditPublicKey: knownAnswer.auditPublicKey,
+    auditEphemeralScalar: knownAnswer.auditEphemeralScalar,
+    slotIndex: slot.slotIndex,
+    ecdhShared,
+  });
+  assert.deepEqual(encrypted.ciphertext, slot.ciphertext);
+  assert.equal(encrypted.tag, slot.tag);
+  reproducedCiphertexts.push(...encrypted.ciphertext);
+  reproducedTags.push(encrypted.tag);
+
+  const decrypted = await decryptNoteAuditSlot({
+    ciphertext: encrypted.ciphertext.map((field) => frDecimalToHex(field)),
+    tag: frDecimalToHex(encrypted.tag),
+    auditPublicKey: knownAnswer.auditPublicKey,
+    auditEphemeralScalar: knownAnswer.auditEphemeralScalar,
+    slotIndex: slot.slotIndex,
+    ecdhShared,
+  });
+  assert.deepEqual(decrypted.plaintext, slot.plaintext);
+}
+
+assert.deepEqual(reproducedTags, knownAnswer.tags);
+assert.equal(
+  encodeCiphertextBlob(reproducedCiphertexts).toString('hex'),
+  knownAnswer.ciphertextBlobHex,
+);
 
 console.log('output-note-encryption: ok');
