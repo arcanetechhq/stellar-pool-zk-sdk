@@ -440,6 +440,32 @@ function commitmentFromPlaintextAndOwnerPub(parameters: {
   return normalizeHex(commitment.toString(16));
 }
 
+export async function commitmentHexFromNoteOpening(input: {
+  value: string;
+  secret: string;
+  nullifier: string;
+  assetHi: string;
+  assetLo: string;
+  applicationId: string;
+  recipientScalarHex: string;
+  ownerMode?: bigint;
+}): Promise<string> {
+  const { babyJub, poseidon } = await primitives();
+  return commitmentFromPlaintextAndOwnerPub({
+    poseidon,
+    plaintext: {
+      value: input.value,
+      secret: input.secret,
+      nullifier: input.nullifier,
+      assetHi: input.assetHi,
+      assetLo: input.assetLo,
+      applicationId: input.applicationId,
+    },
+    ownerPub: ownerPubFromRecipientScalar(babyJub, input.recipientScalarHex),
+    ownerMode: input.ownerMode ?? ZERO,
+  });
+}
+
 export async function decryptOutputNoteEvent(
   input: OutputNoteEventInput,
 ): Promise<DecryptedOutputNote> {
