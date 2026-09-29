@@ -169,6 +169,7 @@ export type {
   ZkLayoutParams,
 } from "./zk-layout";
 export {
+  decryptNoteAuditSlot,
   decryptOutputNoteEvent,
   encryptNoteAuditSlot,
   encryptOutputNoteForDeposit,
