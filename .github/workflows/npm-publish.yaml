@@ -70,8 +70,11 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-          if npm view "@arcanetech/stellar-privacy-pool-zk-sdk" versions --json 2>/dev/null \
-            | python3 -c 'import json,sys; versions=json.load(sys.stdin); sys.exit(0 if any(isinstance(v,str) and v.startswith("1.") and "-" not in v for v in versions) else 1)'; then
+          if ! versions_json="$(npm view "@arcanetech/stellar-privacy-pool-zk-sdk" versions --json 2>/dev/null)"; then
+            echo "could not read npm package versions; refusing to guess STABLE_1X_PUBLISHED" >&2
+            exit 1
+          fi
+          if printf '%s' "$versions_json" | python3 -c 'import json,sys; versions=json.load(sys.stdin); sys.exit(0 if any(isinstance(v,str) and v.startswith("1.") and "-" not in v for v in versions) else 1)'; then
             echo "published=1" >> "$GITHUB_OUTPUT"
           else
             echo "published=0" >> "$GITHUB_OUTPUT"
