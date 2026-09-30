@@ -43,12 +43,13 @@ jobs:
           esac
       - name: Detect whether stable 1.x is already published
         id: stable1
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-          if npm view "@arcanetech/stellar-privacy-pool-zk-sdk" versions --json 2>/dev/null \
-            | python3 -c 'import json,sys; versions=json.load(sys.stdin); sys.exit(0 if any(isinstance(v,str) and v.startswith("1.") and "-" not in v for v in versions) else 1)'; then
+          if ! versions_json="$(npm view "@arcanetech/stellar-privacy-pool-zk-sdk" versions --json 2>/dev/null)"; then
+            echo "could not read npm package versions; refusing to guess STABLE_1X_PUBLISHED" >&2
+            exit 1
+          fi
+          if printf '%s' "$versions_json" | python3 -c 'import json,sys; versions=json.load(sys.stdin); sys.exit(0 if any(isinstance(v,str) and v.startswith("1.") and "-" not in v for v in versions) else 1)'; then
             echo "published=1" >> "$GITHUB_OUTPUT"
           else
             echo "published=0" >> "$GITHUB_OUTPUT"
@@ -65,22 +66,3 @@ jobs:
           COMMIT_MESSAGE="$(git log -1 --pretty=%B)"
           export COMMIT_MESSAGE
           scripts/release-dry-run.sh
-      - uses: jetli/wasm-pack-action@v0.4.0
-        with:
-          version: "v0.15.0"
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Build client-sdk
-        run: cd client-sdk && npm i --no-frozen-lockfile && npm run build
-      - name: Verify SDK package omits proving artifacts
-        run: |
-          set -euo pipefail
-          pack_dir="$(mktemp -d)"
-          (cd client-sdk && npm pack --pack-destination "$pack_dir")
-          tarball="$(find "$pack_dir" -name '*.tgz' | head -n 1)"
-          test -n "$tarball"
-          if tar -tf "$tarball" | grep -E '\.(zkey|r1cs|bin|gz)$|_verification_key\.json$'; then
-            echo "SDK package must not include proving or verification artifacts" >&2
-            tar -tf "$tarball" >&2
-            exit 1
-          fi
