@@ -31,21 +31,20 @@ fi
 
 current_version="$(python3 -c 'import json; print(json.load(open("'"$PACKAGE_JSON"'"))["version"])')"
 
-next_version="$(
-  COMMIT_MESSAGE="$COMMIT_MESSAGE" CURRENT_VERSION="$current_version" RELEASE_LINE="$RELEASE_LINE" python3 - <<'PY'
+COMMIT_MESSAGE="$COMMIT_MESSAGE" CURRENT_VERSION="$current_version" python3 - <<'PY'
 import os
 import re
 import sys
 
 message = os.environ["COMMIT_MESSAGE"]
 version = os.environ["CURRENT_VERSION"]
-line = os.environ["RELEASE_LINE"]
 
 breaking = bool(re.search(r"^(\w+)(\(.+\))?!:", message, re.M)) or (
     "BREAKING CHANGE:" in message
 )
-if breaking and line == "0":
-    print("refusing breaking change on release line 0", file=sys.stderr)
+if breaking:
+    print("breaking-commit: refuse")
+    print("circuits-manifest: stellar/v0/circuits-manifest.json")
     sys.exit(1)
 
 base = re.sub(r"[-+].*$", "", version)
@@ -68,17 +67,15 @@ else:
     print(f"unsupported commit type in message: {message!r}", file=sys.stderr)
     sys.exit(1)
 
-print(f"{major}.{minor}.{patch}")
+print(f"version: {major}.{minor}.{patch}")
+print("dist-tags: v0 latest")
+print("circuits-manifest: stellar/v0/circuits-manifest.json")
+print("breaking-commit: allow")
 PY
-)"
-
-echo "version: ${next_version}"
-echo "dist-tags: v0 latest"
-echo "circuits-manifest: stellar/v0/circuits-manifest.json"
 
 (
   cd "$ROOT/client-sdk"
   npm pack --dry-run
 )
 
-echo "dry-run: packed; skipped publish, git tag, artifact upload, and circuit keygen"
+echo "dry-run: packed current package tree; skipped publish, git tag, artifact upload, and circuit keygen"

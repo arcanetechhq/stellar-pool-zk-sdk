@@ -55,8 +55,9 @@ function assertLine0SuccessPlan(result, expectedVersion) {
   assert.match(result.stdout, /\bv0\b/);
   assert.match(result.stdout, /\blatest\b/);
   assert.match(result.stdout, /stellar\/v0\/circuits-manifest\.json/);
+  assert.match(result.stdout, /^breaking-commit: allow$/m);
   assert.match(result.stdout, /\.tgz\b/);
-  assert.match(result.stdout, /packed; skipped publish/);
+  assert.match(result.stdout, /packed current package tree; skipped publish/);
   assert.doesNotMatch(result.stdout, /\bnpm publish\b/);
   assertNoLocalSideEffects();
 }
@@ -64,6 +65,7 @@ function assertLine0SuccessPlan(result, expectedVersion) {
 function assertLine0BreakingRefusal(result) {
   assert.notEqual(result.status, 0);
   assert.notEqual(result.status, null);
+  assert.match(result.stdout, /^breaking-commit: refuse$/m);
   assert.doesNotMatch(result.stdout, /\bversion:\s*\d+\.\d+\.\d+\b/);
   assert.doesNotMatch(result.stdout, /\b0\.12\.0\b/);
   assert.doesNotMatch(result.stdout, /\b1\.0\.0\b/);
