@@ -187,7 +187,7 @@ function assertLine0BreakingRefusal(result) {
 
 assertLine0SuccessPlan(
   runReleaseDryRun({ releaseLine: "0", commitMessage: "fix: example" }),
-  "0.11.3",
+  "0.11.4",
 );
 assertLine0SuccessPlan(
   runReleaseDryRun({ releaseLine: "0", commitMessage: "feat: example" }),
@@ -309,7 +309,7 @@ assertLine0AfterPromotion(
     commitMessage: "fix: example",
     stable1xPublished: "1",
   }),
-  "0.11.3",
+  "0.11.4",
 );
 
 console.log("release-dry-run line 1 plan ok");
@@ -530,7 +530,7 @@ console.log("release-dry-run protected paths coverage ok");
       },
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /\bversion:\s*0\.11\.3\b/);
+    assert.match(result.stdout, /\bversion:\s*0\.11\.4\b/);
     assert.match(result.stdout, /dist-tags: sdk-v0 latest/);
     assert.match(result.stdout, /stellar\/v0\/circuits-manifest\.json/);
     assert.match(result.stdout, /^mode: publish$/m);
@@ -540,7 +540,7 @@ console.log("release-dry-run protected paths coverage ok");
     );
     assert.doesNotMatch(result.stdout, /packed current package tree/);
     const applied = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-    assert.equal(applied.version, "0.11.3");
+    assert.equal(applied.version, "0.11.4");
     assert.equal(
       spawnSync("git", ["tag", "--list"], { cwd: root, encoding: "utf8" })
         .stdout,

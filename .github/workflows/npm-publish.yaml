@@ -342,10 +342,33 @@ jobs:
             exit 1
           fi
           read -r -a tags <<< "${DIST_TAGS}"
-          primary="${tags[0]}"
+          publish_tag="${tags[0]}"
+          for tag in "${tags[@]}"; do
+            if [[ "$tag" == "latest" ]]; then
+              publish_tag="latest"
+            fi
+          done
           cd client-sdk
-          npm publish --access public --tag "$primary"
+          npm publish --access public --tag "$publish_tag"
           pkg="$(python3 -c 'import json; print(json.load(open("package.json"))["name"])')"
-          for tag in "${tags[@]:1}"; do
-            npm dist-tag add "${pkg}@${VERSION}" "$tag"
+          if [[ -n "${NODE_AUTH_TOKEN}" ]]; then
+            npm config set "//registry.npmjs.org/:_authToken" "${NODE_AUTH_TOKEN}"
+          fi
+          for tag in "${tags[@]}"; do
+            if [[ "$tag" == "$publish_tag" ]]; then
+              continue
+            fi
+            if npm dist-tag add "${pkg}@${VERSION}" "$tag"; then
+              continue
+            fi
+            encoded="${pkg//\//%2f}"
+            code="$(curl -sS -o /tmp/npm-dist-tag-body -w '%{http_code}' -X PUT \
+              -H "Authorization: Bearer ${NODE_AUTH_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "https://registry.npmjs.org/-/package/${encoded}/dist-tags/${tag}" \
+              --data "\"${VERSION}\"")"
+            if [[ "$code" != "200" && "$code" != "201" ]]; then
+              echo "warning: could not move dist-tag ${tag} (HTTP ${code}); publish tag ${publish_tag} is already set" >&2
+              cat /tmp/npm-dist-tag-body >&2 || true
+            fi
           done
