@@ -8,6 +8,8 @@ PLAN="${1:-$OUTPUT_DIR/zk-rebuild-plan.json}"
 BUCKET="${DO_SPACES_BUCKET:-}"
 REGION="${DO_SPACES_REGION:-}"
 ENDPOINT="${DO_SPACES_ENDPOINT:-}"
+MANIFEST_OBJECT="${ZK_CIRCUITS_MANIFEST_OBJECT:-}"
+RELEASE_LINE="${RELEASE_LINE:-}"
 
 if [[ -z "$BUCKET" || -z "$REGION" ]]; then
   echo "DO_SPACES_BUCKET and DO_SPACES_REGION are required" >&2
@@ -24,6 +26,17 @@ if [[ ! -f "$PLAN" ]]; then
   echo "missing rebuild plan $PLAN" >&2
   exit 1
 fi
+if [[ -z "$MANIFEST_OBJECT" ]]; then
+  case "$RELEASE_LINE" in
+    0) MANIFEST_OBJECT="stellar/v0/circuits-manifest.json" ;;
+    1) MANIFEST_OBJECT="stellar/v1/circuits-manifest.json" ;;
+    *)
+      echo "ZK_CIRCUITS_MANIFEST_OBJECT or RELEASE_LINE (0|1) is required" >&2
+      exit 1
+      ;;
+  esac
+fi
+MANIFEST_OBJECT="${MANIFEST_OBJECT#/}"
 
 export AWS_DEFAULT_REGION="$REGION"
 export AWS_EC2_METADATA_DISABLED=true
@@ -37,9 +50,9 @@ if ! aws s3api put-bucket-cors \
   echo "WARN: could not set bucket CORS" >&2
 fi
 
-python3 - "$PLAN" "$OUTPUT_DIR" "$BUCKET" "$ENDPOINT" "$ROOT" <<'PY'
+python3 - "$PLAN" "$OUTPUT_DIR" "$BUCKET" "$ENDPOINT" "$ROOT" "$MANIFEST_OBJECT" <<'PY'
 import json, os, subprocess, sys
-plan_path, output_dir, bucket, endpoint, root = sys.argv[1:]
+plan_path, output_dir, bucket, endpoint, root, manifest_object = sys.argv[1:]
 plan = json.load(open(plan_path, encoding="utf-8"))
 circuits = plan["circuits"]
 
@@ -100,7 +113,7 @@ manifest_path = os.path.join(output_dir, "circuits-manifest.json")
 with open(manifest_path, "w", encoding="utf-8") as handle:
     json.dump(manifest, handle, indent=2, sort_keys=True)
     handle.write("\n")
-dest = f"s3://{bucket}/stellar/circuits-manifest.json"
+dest = f"s3://{bucket}/{manifest_object}"
 subprocess.check_call(
     [
         "aws", "s3", "cp", manifest_path, dest,

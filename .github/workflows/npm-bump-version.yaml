@@ -1,42 +1,76 @@
-name: NPM Package bump version
+name: Release dry-run
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - "development"
-      - "main"
+  pull_request:
     paths:
       - "client-sdk/**/*"
       - "hermez-ptau"
       - "shapes.json"
-      - "scripts/generate-circuit-main.sh"
-      - "scripts/build-shape.sh"
+      - "scripts/**/*"
+      - "test/release-dry-run.mjs"
       - ".gitmodules"
       - "soroban-privacy-pools"
       - ".github/workflows/npm-bump-version.yaml"
+      - ".github/workflows/npm-publish.yaml"
 
 jobs:
-  build:
+  dry-run:
     runs-on: ubuntu-latest
     env:
       GIT_LFS_SKIP_SMUDGE: "1"
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
           submodules: true
           lfs: false
           token: ${{ secrets.SUBMODULE_PAT }}
       - uses: actions/setup-node@v4
         with:
           node-version: "20.x"
+      - name: Resolve release line from base branch
+        id: line
+        run: |
+          set -euo pipefail
+          base="${{ github.base_ref }}"
+          case "$base" in
+            development) echo "release_line=0" >> "$GITHUB_OUTPUT" ;;
+            v1) echo "release_line=1" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "Unsupported pull request base branch: $base (expected development or v1)" >&2
+              exit 1
+              ;;
+          esac
+      - name: Detect whether stable 1.x is already published
+        id: stable1
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if npm view "@arcanetech/stellar-privacy-pool-zk-sdk" versions --json 2>/dev/null \
+            | python3 -c 'import json,sys; versions=json.load(sys.stdin); sys.exit(0 if any(isinstance(v,str) and v.startswith("1.") and "-" not in v for v in versions) else 1)'; then
+            echo "published=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=0" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Rehearse release plan (dry-run)
+        env:
+          DRY_RUN: "1"
+          RELEASE_LINE: ${{ steps.line.outputs.release_line }}
+          STABLE_1X_PUBLISHED: ${{ steps.stable1.outputs.published }}
+          PROMOTE_STABLE: "0"
+        run: |
+          set -euo pipefail
+          chmod +x scripts/*.sh
+          COMMIT_MESSAGE="$(git log -1 --pretty=%B)"
+          export COMMIT_MESSAGE
+          scripts/release-dry-run.sh
       - uses: jetli/wasm-pack-action@v0.4.0
         with:
           version: "v0.15.0"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: "Build client-sdk"
+      - name: Build client-sdk
         run: cd client-sdk && npm i --no-frozen-lockfile && npm run build
       - name: Verify SDK package omits proving artifacts
         run: |
@@ -50,39 +84,3 @@ jobs:
             tar -tf "$tarball" >&2
             exit 1
           fi
-
-  bump-version:
-    permissions:
-      contents: write
-      id-token: write
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.ref }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20.x"
-      - name: "Automated Version Bump"
-        id: bump_version
-        uses: "phips28/gh-action-bump-version@master"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGEJSON_DIR: "client-sdk"
-        with:
-          tag-prefix: "v"
-          rc-wording:
-          default: prerelease
-          preid: rc
-      - name: Create GitHub prerelease
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          tag="${{ steps.bump_version.outputs.newTag }}"
-          if [[ -z "$tag" ]]; then
-            echo "bump action did not produce a new tag" >&2
-            exit 1
-          fi
-          gh release create "$tag" --prerelease --title "$tag" --generate-notes
