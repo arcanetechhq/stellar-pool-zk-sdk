@@ -10,6 +10,9 @@ RELEASE_LINE="${RELEASE_LINE:-}"
 COMMIT_MESSAGE="${COMMIT_MESSAGE:-}"
 PROMOTE_STABLE="${PROMOTE_STABLE:-0}"
 STABLE_1X_PUBLISHED="${STABLE_1X_PUBLISHED:-0}"
+MERGE_FROM="${MERGE_FROM:-}"
+MERGE_INTO="${MERGE_INTO:-}"
+MERGE_REPO="${MERGE_REPO:-$ROOT}"
 
 if [[ "$DRY_RUN" != "1" ]]; then
   echo "release-dry-run.sh requires DRY_RUN=1" >&2
@@ -29,6 +32,13 @@ fi
 if [[ "$RELEASE_LINE" != "0" && "$RELEASE_LINE" != "1" ]]; then
   echo "RELEASE_LINE=${RELEASE_LINE} is not supported" >&2
   exit 1
+fi
+
+if [[ -n "$MERGE_FROM" || -n "$MERGE_INTO" ]]; then
+  if [[ -z "$MERGE_FROM" || -z "$MERGE_INTO" ]]; then
+    echo "MERGE_FROM and MERGE_INTO are required together" >&2
+    exit 1
+  fi
 fi
 
 current_version="$(python3 -c 'import json; print(json.load(open("'"$PACKAGE_JSON"'"))["version"])')"
@@ -141,6 +151,170 @@ print("dist-tags: latest")
 print("circuits-manifest: stellar/v1/circuits-manifest.json")
 print("breaking-commit: allow")
 PY
+
+if [[ -n "$MERGE_FROM" && -n "$MERGE_INTO" ]]; then
+  MERGE_FROM="$MERGE_FROM" \
+  MERGE_INTO="$MERGE_INTO" \
+  MERGE_REPO="$MERGE_REPO" \
+  python3 - <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+merge_repo = os.environ["MERGE_REPO"]
+merge_from = os.environ["MERGE_FROM"]
+merge_into = os.environ["MERGE_INTO"]
+
+PACKAGE_JSON = "client-sdk/package.json"
+ZK_DEP = "@arcanetech/stellar-privacy-pool-zk-sdk"
+
+# Ordered protected paths: first matching refusal wins.
+PROTECTED = [
+    ("package version", PACKAGE_JSON),
+    ("zk SDK dependency range", PACKAGE_JSON),
+    ("shapes catalog", "shapes.json"),
+    ("circuit sources", "circuits"),
+    ("contracts submodule commit", "soroban-privacy-pools"),
+    ("release manifest", "artifacts/circuits-manifest.json"),
+]
+
+
+def git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", merge_repo, *args],
+        text=True,
+        capture_output=True,
+    )
+
+
+def blob_at(commit: str, path: str) -> str | None:
+    result = git("rev-parse", f"{commit}:{path}")
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def show_at(commit: str, path: str) -> str | None:
+    result = git("show", f"{commit}:{path}")
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def paths_under(commit: str, prefix: str) -> list[str]:
+    result = git("ls-tree", "-r", "--name-only", commit)
+    if result.returncode != 0:
+        return []
+    paths = [
+        line
+        for line in result.stdout.splitlines()
+        if line == prefix or line.startswith(prefix + "/")
+    ]
+    if blob_at(commit, prefix) is not None and prefix not in paths:
+        paths.append(prefix)
+    return sorted(set(paths))
+
+
+def package_field(commit: str, field: str):
+    raw = show_at(commit, PACKAGE_JSON)
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if field == "version":
+        return data.get("version")
+    if field == "zk_dep":
+        deps = data.get("dependencies") or {}
+        return deps.get(ZK_DEP)
+    return None
+
+
+merge = git(
+    "merge-tree",
+    "--write-tree",
+    "--name-only",
+    "--messages",
+    merge_into,
+    merge_from,
+)
+merge_out = (merge.stdout or "") + (merge.stderr or "")
+lines = [ln for ln in merge_out.splitlines() if ln.strip()]
+result_tree = lines[0] if lines and merge.returncode in (0, 1) else None
+conflicted: set[str] = set()
+if merge.returncode != 0:
+    for ln in lines[1:]:
+        if ln.startswith("CONFLICT"):
+            marker = " in "
+            if marker in ln:
+                conflicted.add(ln.split(marker, 1)[1].strip())
+        elif "\t" in ln:
+            conflicted.add(ln.split("\t")[-1].strip())
+        elif " " not in ln and ln != result_tree:
+            conflicted.add(ln)
+
+
+def path_replaced_with_from(path: str) -> bool:
+    into_paths = paths_under(merge_into, path)
+    from_paths = paths_under(merge_from, path)
+    all_paths = sorted(set(into_paths) | set(from_paths)) or [path]
+    for p in all_paths:
+        into_blob = blob_at(merge_into, p)
+        from_blob = blob_at(merge_from, p)
+        if into_blob == from_blob:
+            continue
+        if any(
+            c == p or c.startswith(p + "/") or p.startswith(c + "/")
+            for c in conflicted
+        ):
+            return True
+        if result_tree is None:
+            continue
+        result_blob = blob_at(result_tree, p)
+        if (
+            result_blob is not None
+            and from_blob is not None
+            and result_blob == from_blob
+            and result_blob != into_blob
+        ):
+            return True
+    return False
+
+
+checked_package_json = False
+for label, path in PROTECTED:
+    if path == PACKAGE_JSON:
+        if checked_package_json:
+            continue
+        if not path_replaced_with_from(PACKAGE_JSON):
+            checked_package_json = True
+            continue
+        into_ver = package_field(merge_into, "version")
+        from_ver = package_field(merge_from, "version")
+        into_dep = package_field(merge_into, "zk_dep")
+        from_dep = package_field(merge_from, "zk_dep")
+        if into_ver != from_ver:
+            print("protected-path: refuse package version")
+        elif into_dep != from_dep:
+            print("protected-path: refuse zk SDK dependency range")
+        else:
+            print("protected-path: refuse package version")
+        sys.exit(1)
+
+    if path_replaced_with_from(path):
+        print(f"protected-path: refuse {label}")
+        sys.exit(1)
+
+if merge.returncode != 0:
+    print("protected-path: allow")
+    print("merge: conflict")
+    sys.exit(1)
+
+print("protected-path: allow")
+PY
+fi
 
 (
   cd "$ROOT/client-sdk"

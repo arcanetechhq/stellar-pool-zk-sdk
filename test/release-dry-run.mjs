@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -13,6 +20,9 @@ function runReleaseDryRun({
   commitMessage,
   promoteStable,
   stable1xPublished,
+  mergeFrom,
+  mergeInto,
+  mergeRepo,
 } = {}) {
   const env = {
     ...process.env,
@@ -26,11 +36,100 @@ function runReleaseDryRun({
   if (stable1xPublished !== undefined) {
     env.STABLE_1X_PUBLISHED = stable1xPublished;
   }
+  if (mergeFrom !== undefined) {
+    env.MERGE_FROM = mergeFrom;
+  }
+  if (mergeInto !== undefined) {
+    env.MERGE_INTO = mergeInto;
+  }
+  if (mergeRepo !== undefined) {
+    env.MERGE_REPO = mergeRepo;
+  }
   return spawnSync(script, [], {
     cwd: root,
     encoding: "utf8",
     env,
   });
+}
+
+function git(cwd, args) {
+  const result = spawnSync(
+    "git",
+    ["-c", "core.hooksPath=/dev/null", "-c", "init.templateDir=", ...args],
+    {
+      cwd,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_TEMPLATE_DIR: "",
+      },
+    },
+  );
+  assert.equal(
+    result.status,
+    0,
+    `git ${args.join(" ")} failed: ${result.stderr || result.stdout}`,
+  );
+  return result.stdout.trim();
+}
+
+function writeTree(dir, files) {
+  for (const [rel, content] of Object.entries(files)) {
+    const abs = join(dir, rel);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, content);
+  }
+}
+
+function createMergeFixture(mutate) {
+  const scratch = join(root, ".scratch");
+  mkdirSync(scratch, { recursive: true });
+  const dir = mkdtempSync(join(scratch, "zk-sdk-merge-"));
+  git(dir, ["init", "-q"]);
+  git(dir, ["config", "user.email", "merge-fixture@test"]);
+  git(dir, ["config", "user.name", "merge-fixture"]);
+
+  const baseFiles = {
+    "client-sdk/package.json":
+      '{\n  "name": "@arcanetech/stellar-privacy-pool-zk-sdk",\n  "version": "1.0.0-rc.0"\n}\n',
+    "shapes.json": '{"shapes":[{"id":"2x2"}]}\n',
+    "circuits/main.circom": "base circuit\n",
+    "soroban-privacy-pools": "submodule-commit-base\n",
+    "artifacts/circuits-manifest.json": '{"circuits":{}}\n',
+    "sdk/unprotected.js": "base unprotected\n",
+  };
+  writeTree(dir, baseFiles);
+  git(dir, ["add", "."]);
+  git(dir, ["commit", "-qm", "base"]);
+  const base = git(dir, ["rev-parse", "HEAD"]);
+
+  git(dir, ["checkout", "-qb", "line0"]);
+  const line0Files = { ...baseFiles };
+  mutate.line0?.(line0Files);
+  writeTree(dir, line0Files);
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-qm", "line0 tip"]);
+  const line0 = git(dir, ["rev-parse", "HEAD"]);
+
+  git(dir, ["checkout", "-q", base]);
+  git(dir, ["checkout", "-qb", "line1"]);
+  const line1Files = { ...baseFiles };
+  mutate.line1?.(line1Files);
+  writeTree(dir, line1Files);
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "--allow-empty", "-qm", "line1 tip"]);
+  const line1 = git(dir, ["rev-parse", "HEAD"]);
+
+  return {
+    dir,
+    line0,
+    line1,
+    cleanup() {
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
 }
 
 function tarballCount() {
@@ -208,3 +307,181 @@ assertLine0AfterPromotion(
 );
 
 console.log("release-dry-run line 1 plan ok");
+
+{
+  const fixture = createMergeFixture({
+    line0(files) {
+      files["shapes.json"] = '{"shapes":[{"id":"0x-line"}]}\n';
+    },
+    line1(files) {
+      files["shapes.json"] = '{"shapes":[{"id":"1x-line"}]}\n';
+      files["sdk/unprotected.js"] = "line1 only change\n";
+    },
+  });
+  try {
+    const result = runReleaseDryRun({
+      releaseLine: "1",
+      commitMessage: "fix: example",
+      mergeFrom: fixture.line0,
+      mergeInto: fixture.line1,
+      mergeRepo: fixture.dir,
+    });
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.notEqual(result.status, null);
+    assert.match(result.stdout, /protected-path:.*shapes catalog/i);
+    assert.doesNotMatch(result.stdout, /\.tgz\b/);
+    assertNoLocalSideEffects();
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+console.log("release-dry-run protected merge refuse ok");
+
+{
+  const fixture = createMergeFixture({
+    line0(files) {
+      files["sdk/unprotected.js"] = "fix from line0\n";
+    },
+  });
+  try {
+    const result = runReleaseDryRun({
+      releaseLine: "1",
+      commitMessage: "fix: example",
+      mergeFrom: fixture.line0,
+      mergeInto: fixture.line1,
+      mergeRepo: fixture.dir,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /^protected-path: allow$/m);
+    assert.match(result.stdout, /\.tgz\b/);
+    assertNoLocalSideEffects();
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+console.log("release-dry-run protected merge clean ok");
+
+{
+  const fixture = createMergeFixture({
+    line0(files) {
+      files["sdk/unprotected.js"] = "line0 unprotected\n";
+    },
+    line1(files) {
+      files["sdk/unprotected.js"] = "line1 unprotected\n";
+    },
+  });
+  try {
+    const beforeUnprotected = readFileSync(
+      join(fixture.dir, "sdk/unprotected.js"),
+      "utf8",
+    );
+    const result = runReleaseDryRun({
+      releaseLine: "1",
+      commitMessage: "fix: example",
+      mergeFrom: fixture.line0,
+      mergeInto: fixture.line1,
+      mergeRepo: fixture.dir,
+    });
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.notEqual(result.status, null);
+    assert.match(result.stdout, /^protected-path: allow$/m);
+    assert.match(result.stdout, /^merge: conflict$/m);
+    assert.doesNotMatch(result.stdout, /protected-path: refuse/);
+    assert.doesNotMatch(result.stdout, /\.tgz\b/);
+    assert.equal(
+      readFileSync(join(fixture.dir, "sdk/unprotected.js"), "utf8"),
+      beforeUnprotected,
+    );
+    assertNoLocalSideEffects();
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+console.log("release-dry-run protected merge conflict ok");
+
+const protectedPathCases = [
+  {
+    label: "package version",
+    path: "client-sdk/package.json",
+    from: '{\n  "name": "@arcanetech/stellar-privacy-pool-zk-sdk",\n  "version": "0.11.2"\n}\n',
+  },
+  {
+    label: "shapes catalog",
+    path: "shapes.json",
+    from: '{"shapes":[{"id":"0x-only"}]}\n',
+  },
+  {
+    label: "circuit sources",
+    path: "circuits/main.circom",
+    from: "0x circuit\n",
+  },
+  {
+    label: "contracts submodule commit",
+    path: "soroban-privacy-pools",
+    from: "submodule-commit-0x\n",
+  },
+  {
+    label: "release manifest",
+    path: "artifacts/circuits-manifest.json",
+    from: '{"circuits":{"main":{"version":"0.x"}}}\n',
+  },
+];
+
+for (const { label, path, from } of protectedPathCases) {
+  const fixture = createMergeFixture({
+    line0(files) {
+      files[path] = from;
+    },
+  });
+  try {
+    const result = runReleaseDryRun({
+      releaseLine: "1",
+      commitMessage: "fix: example",
+      mergeFrom: fixture.line0,
+      mergeInto: fixture.line1,
+      mergeRepo: fixture.dir,
+    });
+    assert.notEqual(result.status, 0, `${label}: ${result.stdout}`);
+    assert.match(
+      result.stdout,
+      new RegExp(`protected-path: refuse ${label.replaceAll(" ", "\\s+")}`, "i"),
+    );
+    assert.doesNotMatch(result.stdout, /\.tgz\b/);
+    assertNoLocalSideEffects();
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+{
+  const fixture = createMergeFixture({
+    line0(files) {
+      files["client-sdk/package.json"] =
+        '{\n  "name": "@arcanetech/stellar-privacy-pool-zk-sdk",\n  "version": "1.0.0-rc.0",\n  "dependencies": {\n    "@arcanetech/stellar-privacy-pool-zk-sdk": ">=0.11.0 <1.0.0"\n  }\n}\n';
+    },
+    line1(files) {
+      files["client-sdk/package.json"] =
+        '{\n  "name": "@arcanetech/stellar-privacy-pool-zk-sdk",\n  "version": "1.0.0-rc.0",\n  "dependencies": {\n    "@arcanetech/stellar-privacy-pool-zk-sdk": ">=1.0.0 <2.0.0"\n  }\n}\n';
+    },
+  });
+  try {
+    const result = runReleaseDryRun({
+      releaseLine: "1",
+      commitMessage: "fix: example",
+      mergeFrom: fixture.line0,
+      mergeInto: fixture.line1,
+      mergeRepo: fixture.dir,
+    });
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.match(result.stdout, /protected-path: refuse zk SDK dependency range/i);
+    assert.doesNotMatch(result.stdout, /\.tgz\b/);
+    assertNoLocalSideEffects();
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+console.log("release-dry-run protected paths coverage ok");
