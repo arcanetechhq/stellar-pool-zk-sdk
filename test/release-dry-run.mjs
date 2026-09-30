@@ -163,7 +163,7 @@ function assertLine0SuccessPlan(result, expectedVersion) {
     result.stdout,
     new RegExp(`\\b${expectedVersion.replaceAll(".", "\\.")}\\b`),
   );
-  assert.match(result.stdout, /\bv0\b/);
+  assert.match(result.stdout, /dist-tags: sdk-v0 latest/);
   assert.match(result.stdout, /\blatest\b/);
   assert.match(result.stdout, /stellar\/v0\/circuits-manifest\.json/);
   assert.match(result.stdout, /^breaking-commit: allow$/m);
@@ -187,7 +187,7 @@ function assertLine0BreakingRefusal(result) {
 
 assertLine0SuccessPlan(
   runReleaseDryRun({ releaseLine: "0", commitMessage: "fix: example" }),
-  "0.11.2",
+  "0.11.3",
 );
 assertLine0SuccessPlan(
   runReleaseDryRun({ releaseLine: "0", commitMessage: "feat: example" }),
@@ -294,7 +294,7 @@ function assertLine0AfterPromotion(result, expectedVersion) {
     result.stdout,
     new RegExp(`\\bversion:\\s*${expectedVersion.replaceAll(".", "\\.")}\\b`),
   );
-  assert.match(result.stdout, /\bv0\b/);
+  assert.match(result.stdout, /dist-tags: sdk-v0$/m);
   assert.doesNotMatch(result.stdout, /\blatest\b/);
   assert.match(result.stdout, /stellar\/v0\/circuits-manifest\.json/);
   assert.match(result.stdout, /^protected-path: allow$/m);
@@ -309,7 +309,7 @@ assertLine0AfterPromotion(
     commitMessage: "fix: example",
     stable1xPublished: "1",
   }),
-  "0.11.2",
+  "0.11.3",
 );
 
 console.log("release-dry-run line 1 plan ok");
@@ -530,8 +530,8 @@ console.log("release-dry-run protected paths coverage ok");
       },
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /\bversion:\s*0\.11\.2\b/);
-    assert.match(result.stdout, /\bv0\b/);
+    assert.match(result.stdout, /\bversion:\s*0\.11\.3\b/);
+    assert.match(result.stdout, /dist-tags: sdk-v0 latest/);
     assert.match(result.stdout, /stellar\/v0\/circuits-manifest\.json/);
     assert.match(result.stdout, /^mode: publish$/m);
     assert.match(
@@ -540,7 +540,7 @@ console.log("release-dry-run protected paths coverage ok");
     );
     assert.doesNotMatch(result.stdout, /packed current package tree/);
     const applied = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-    assert.equal(applied.version, "0.11.2");
+    assert.equal(applied.version, "0.11.3");
     assert.equal(
       spawnSync("git", ["tag", "--list"], { cwd: root, encoding: "utf8" })
         .stdout,

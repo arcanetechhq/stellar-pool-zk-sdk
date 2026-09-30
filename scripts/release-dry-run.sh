@@ -116,9 +116,9 @@ if release_line == "0":
 
     next_version = f"{major}.{minor}.{patch}"
     if stable_1x_published:
-        dist_tags = "v0"
+        dist_tags = "sdk-v0"
     else:
-        dist_tags = "v0 latest"
+        dist_tags = "sdk-v0 latest"
     write_plan(next_version, dist_tags, "stellar/v0/circuits-manifest.json", "allow")
     print(f"version: {next_version}")
     print(f"dist-tags: {dist_tags}")
