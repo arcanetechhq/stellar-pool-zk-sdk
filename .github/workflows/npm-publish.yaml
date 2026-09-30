@@ -99,6 +99,13 @@ jobs:
           version="$(python3 -c 'import json; print(json.load(open("client-sdk/package.json"))["version"])')"
           echo "selected version ${version}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - name: Use the workflow token for git pushes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
       - name: Commit selected package version
         env:
           VERSION: ${{ steps.release.outputs.version }}
