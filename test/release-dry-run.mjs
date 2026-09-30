@@ -93,7 +93,7 @@ function createMergeFixture(mutate) {
 
   const baseFiles = {
     "client-sdk/package.json":
-      '{\n  "name": "@arcanetech/stellar-privacy-pool-zk-sdk",\n  "version": "1.0.0-rc.0"\n}\n',
+      '{\n  "name": "@arcanetech/stellar-privacy-pool-zk-sdk",\n  "version": "1.0.0-rc.0",\n  "description": "base"\n}\n',
     "shapes.json": '{"shapes":[{"id":"2x2"}]}\n',
     "circuits/main.circom": "base circuit\n",
     "soroban-privacy-pools": "submodule-commit-base\n",
@@ -167,6 +167,7 @@ function assertLine0SuccessPlan(result, expectedVersion) {
   assert.match(result.stdout, /\blatest\b/);
   assert.match(result.stdout, /stellar\/v0\/circuits-manifest\.json/);
   assert.match(result.stdout, /^breaking-commit: allow$/m);
+  assert.match(result.stdout, /^protected-path: allow$/m);
   assert.match(result.stdout, /\.tgz\b/);
   assert.match(result.stdout, /packed current package tree; skipped publish/);
   assert.doesNotMatch(result.stdout, /\bnpm publish\b/);
@@ -177,6 +178,7 @@ function assertLine0BreakingRefusal(result) {
   assert.notEqual(result.status, 0);
   assert.notEqual(result.status, null);
   assert.match(result.stdout, /^breaking-commit: refuse$/m);
+  assert.match(result.stdout, /^protected-path: allow$/m);
   assert.doesNotMatch(result.stdout, /\bversion:\s*\d+\.\d+\.\d+\b/);
   assert.doesNotMatch(result.stdout, /\b0\.12\.0\b/);
   assert.doesNotMatch(result.stdout, /\b1\.0\.0\b/);
@@ -213,6 +215,7 @@ function assertLine1RcPlan(result, expectedVersion) {
   assert.doesNotMatch(result.stdout, /\blatest\b/);
   assert.match(result.stdout, /stellar\/v1\/circuits-manifest\.json/);
   assert.match(result.stdout, /^breaking-commit: allow$/m);
+  assert.match(result.stdout, /^protected-path: allow$/m);
   assert.match(result.stdout, /\.tgz\b/);
   assert.match(result.stdout, /packed current package tree; skipped publish/);
   assertNoLocalSideEffects();
@@ -238,6 +241,7 @@ function assertLine1PromotionPlan(result) {
   assert.doesNotMatch(result.stdout, /\bnext\b/);
   assert.doesNotMatch(result.stdout, /\bv0\b/);
   assert.match(result.stdout, /stellar\/v1\/circuits-manifest\.json/);
+  assert.match(result.stdout, /^protected-path: allow$/m);
   assert.match(result.stdout, /\.tgz\b/);
   assert.match(result.stdout, /packed current package tree; skipped publish/);
   assertNoLocalSideEffects();
@@ -261,6 +265,7 @@ function assertLine1StablePlan(result, expectedVersion) {
   assert.doesNotMatch(result.stdout, /\bnext\b/);
   assert.doesNotMatch(result.stdout, /\bv0\b/);
   assert.match(result.stdout, /stellar\/v1\/circuits-manifest\.json/);
+  assert.match(result.stdout, /^protected-path: allow$/m);
   assert.match(result.stdout, /\.tgz\b/);
   assert.match(result.stdout, /packed current package tree; skipped publish/);
   assertNoLocalSideEffects();
@@ -292,6 +297,7 @@ function assertLine0AfterPromotion(result, expectedVersion) {
   assert.match(result.stdout, /\bv0\b/);
   assert.doesNotMatch(result.stdout, /\blatest\b/);
   assert.match(result.stdout, /stellar\/v0\/circuits-manifest\.json/);
+  assert.match(result.stdout, /^protected-path: allow$/m);
   assert.match(result.stdout, /\.tgz\b/);
   assert.match(result.stdout, /packed current package tree; skipped publish/);
   assertNoLocalSideEffects();
@@ -478,6 +484,30 @@ for (const { label, path, from } of protectedPathCases) {
     assert.notEqual(result.status, 0, result.stdout);
     assert.match(result.stdout, /protected-path: refuse zk SDK dependency range/i);
     assert.doesNotMatch(result.stdout, /\.tgz\b/);
+    assertNoLocalSideEffects();
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+{
+  const fixture = createMergeFixture({
+    line0(files) {
+      files["client-sdk/package.json"] =
+        '{\n  "name": "@arcanetech/stellar-privacy-pool-zk-sdk",\n  "version": "1.0.0-rc.0",\n  "description": "from line0 only"\n}\n';
+    },
+  });
+  try {
+    const result = runReleaseDryRun({
+      releaseLine: "1",
+      commitMessage: "fix: example",
+      mergeFrom: fixture.line0,
+      mergeInto: fixture.line1,
+      mergeRepo: fixture.dir,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /^protected-path: allow$/m);
+    assert.match(result.stdout, /\.tgz\b/);
     assertNoLocalSideEffects();
   } finally {
     fixture.cleanup();

@@ -80,6 +80,7 @@ if release_line == "0":
     if breaking:
         print("breaking-commit: refuse")
         print("circuits-manifest: stellar/v0/circuits-manifest.json")
+        print("protected-path: allow")
         sys.exit(1)
 
     major, minor, patch = parse_semver(version)
@@ -152,7 +153,9 @@ print("circuits-manifest: stellar/v1/circuits-manifest.json")
 print("breaking-commit: allow")
 PY
 
-if [[ -n "$MERGE_FROM" && -n "$MERGE_INTO" ]]; then
+if [[ -z "$MERGE_FROM" && -z "$MERGE_INTO" ]]; then
+  echo "protected-path: allow"
+elif [[ -n "$MERGE_FROM" && -n "$MERGE_INTO" ]]; then
   MERGE_FROM="$MERGE_FROM" \
   MERGE_INTO="$MERGE_INTO" \
   MERGE_REPO="$MERGE_REPO" \
@@ -169,10 +172,7 @@ merge_into = os.environ["MERGE_INTO"]
 PACKAGE_JSON = "client-sdk/package.json"
 ZK_DEP = "@arcanetech/stellar-privacy-pool-zk-sdk"
 
-# Ordered protected paths: first matching refusal wins.
-PROTECTED = [
-    ("package version", PACKAGE_JSON),
-    ("zk SDK dependency range", PACKAGE_JSON),
+PROTECTED_PATHS = [
     ("shapes catalog", "shapes.json"),
     ("circuit sources", "circuits"),
     ("contracts submodule commit", "soroban-privacy-pools"),
@@ -216,7 +216,7 @@ def paths_under(commit: str, prefix: str) -> list[str]:
     return sorted(set(paths))
 
 
-def package_field(commit: str, field: str):
+def package_json(commit: str) -> dict | None:
     raw = show_at(commit, PACKAGE_JSON)
     if raw is None:
         return None
@@ -224,12 +224,20 @@ def package_field(commit: str, field: str):
         data = json.loads(raw)
     except json.JSONDecodeError:
         return None
-    if field == "version":
-        return data.get("version")
-    if field == "zk_dep":
-        deps = data.get("dependencies") or {}
-        return deps.get(ZK_DEP)
-    return None
+    return data if isinstance(data, dict) else None
+
+
+def package_version(commit: str):
+    data = package_json(commit)
+    return None if data is None else data.get("version")
+
+
+def package_zk_dep_range(commit: str):
+    data = package_json(commit)
+    if data is None:
+        return None
+    deps = data.get("dependencies") or {}
+    return deps.get(ZK_DEP)
 
 
 merge = git(
@@ -256,6 +264,13 @@ if merge.returncode != 0:
             conflicted.add(ln)
 
 
+def path_in_conflict(path: str) -> bool:
+    return any(
+        c == path or c.startswith(path + "/") or path.startswith(c + "/")
+        for c in conflicted
+    )
+
+
 def path_replaced_with_from(path: str) -> bool:
     into_paths = paths_under(merge_into, path)
     from_paths = paths_under(merge_from, path)
@@ -265,10 +280,7 @@ def path_replaced_with_from(path: str) -> bool:
         from_blob = blob_at(merge_from, p)
         if into_blob == from_blob:
             continue
-        if any(
-            c == p or c.startswith(p + "/") or p.startswith(c + "/")
-            for c in conflicted
-        ):
+        if path_in_conflict(p):
             return True
         if result_tree is None:
             continue
@@ -283,26 +295,40 @@ def path_replaced_with_from(path: str) -> bool:
     return False
 
 
-checked_package_json = False
-for label, path in PROTECTED:
-    if path == PACKAGE_JSON:
-        if checked_package_json:
-            continue
-        if not path_replaced_with_from(PACKAGE_JSON):
-            checked_package_json = True
-            continue
-        into_ver = package_field(merge_into, "version")
-        from_ver = package_field(merge_from, "version")
-        into_dep = package_field(merge_into, "zk_dep")
-        from_dep = package_field(merge_from, "zk_dep")
-        if into_ver != from_ver:
-            print("protected-path: refuse package version")
-        elif into_dep != from_dep:
-            print("protected-path: refuse zk SDK dependency range")
-        else:
-            print("protected-path: refuse package version")
+def result_package_json() -> dict | None:
+    if result_tree is None:
+        return None
+    return package_json(result_tree)
+
+
+pkg_conflict = path_in_conflict(PACKAGE_JSON)
+pkg_taken_from = path_replaced_with_from(PACKAGE_JSON) and not pkg_conflict
+into_ver = package_version(merge_into)
+from_ver = package_version(merge_from)
+into_dep = package_zk_dep_range(merge_into)
+from_dep = package_zk_dep_range(merge_from)
+
+if pkg_conflict or pkg_taken_from:
+    result_pkg = result_package_json() if pkg_taken_from else None
+    result_ver = None if result_pkg is None else result_pkg.get("version")
+    result_dep = None
+    if result_pkg is not None:
+        result_dep = (result_pkg.get("dependencies") or {}).get(ZK_DEP)
+
+    version_becomes_from = into_ver != from_ver and (
+        pkg_conflict or result_ver == from_ver
+    )
+    dep_becomes_from = into_dep != from_dep and (
+        pkg_conflict or result_dep == from_dep
+    )
+    if version_becomes_from:
+        print("protected-path: refuse package version")
+        sys.exit(1)
+    if dep_becomes_from:
+        print("protected-path: refuse zk SDK dependency range")
         sys.exit(1)
 
+for label, path in PROTECTED_PATHS:
     if path_replaced_with_from(path):
         print(f"protected-path: refuse {label}")
         sys.exit(1)
