@@ -9,12 +9,26 @@ CDN_ORIGIN="${ZK_ARTIFACT_CDN_ORIGIN:-}"
 BUCKET="${DO_SPACES_BUCKET:-}"
 REGION="${DO_SPACES_REGION:-}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT/artifacts}"
+MANIFEST_OBJECT="${ZK_CIRCUITS_MANIFEST_OBJECT:-}"
+RELEASE_LINE="${RELEASE_LINE:-}"
 
 if [[ -z "$PACKAGE_VERSION" ]]; then
   PACKAGE_VERSION="$(python3 -c 'import json; print(json.load(open("'"$ROOT"'/client-sdk/package.json"))["version"])')"
 fi
 PACKAGE_VERSION="${PACKAGE_VERSION#v}"
 CDN_ORIGIN="${CDN_ORIGIN%/}"
+
+if [[ -z "$MANIFEST_OBJECT" ]]; then
+  case "$RELEASE_LINE" in
+    0) MANIFEST_OBJECT="stellar/v0/circuits-manifest.json" ;;
+    1) MANIFEST_OBJECT="stellar/v1/circuits-manifest.json" ;;
+    *)
+      echo "ZK_CIRCUITS_MANIFEST_OBJECT or RELEASE_LINE (0|1) is required" >&2
+      exit 1
+      ;;
+  esac
+fi
+MANIFEST_OBJECT="${MANIFEST_OBJECT#/}"
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -24,10 +38,11 @@ fetch_json() {
 
 manifest_url=""
 if [[ -n "$CDN_ORIGIN" ]]; then
-  manifest_url="${CDN_ORIGIN}/stellar/circuits-manifest.json"
+  manifest_url="${CDN_ORIGIN}/${MANIFEST_OBJECT}"
 elif [[ -n "$BUCKET" && -n "$REGION" ]]; then
-  manifest_url="https://${BUCKET}.${REGION}.digitaloceanspaces.com/stellar/circuits-manifest.json"
+  manifest_url="https://${BUCKET}.${REGION}.digitaloceanspaces.com/${MANIFEST_OBJECT}"
 fi
+echo "circuits-manifest-object=${MANIFEST_OBJECT}" >&2
 
 existing="$(mktemp)"
 trap 'rm -f "$existing"' EXIT

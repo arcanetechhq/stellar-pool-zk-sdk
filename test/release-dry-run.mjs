@@ -515,3 +515,41 @@ for (const { label, path, from } of protectedPathCases) {
 }
 
 console.log("release-dry-run protected paths coverage ok");
+
+{
+  const packageBeforePublish = readFileSync(packageJsonPath, "utf8");
+  try {
+    const result = spawnSync(script, [], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        DRY_RUN: "0",
+        RELEASE_LINE: "0",
+        COMMIT_MESSAGE: "fix: example",
+      },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /\bversion:\s*0\.11\.2\b/);
+    assert.match(result.stdout, /\bv0\b/);
+    assert.match(result.stdout, /stellar\/v0\/circuits-manifest\.json/);
+    assert.match(result.stdout, /^mode: publish$/m);
+    assert.match(
+      result.stdout,
+      /skipped:.*npm publish/i,
+    );
+    assert.doesNotMatch(result.stdout, /packed current package tree/);
+    const applied = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+    assert.equal(applied.version, "0.11.2");
+    assert.equal(
+      spawnSync("git", ["tag", "--list"], { cwd: root, encoding: "utf8" })
+        .stdout,
+      tagsBefore,
+    );
+    assert.equal(tarballCount(), tarballsBefore);
+  } finally {
+    writeFileSync(packageJsonPath, packageBeforePublish);
+  }
+}
+
+console.log("release publish-mode plan apply ok");

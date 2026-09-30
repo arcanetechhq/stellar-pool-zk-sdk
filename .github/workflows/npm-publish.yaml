@@ -1,14 +1,25 @@
 name: NPM Package publish
 
 on:
-  release:
-    types: [published]
+  push:
+    branches:
+      - development
+      - v1
+    paths:
+      - "client-sdk/**/*"
+      - "hermez-ptau"
+      - "shapes.json"
+      - "scripts/**/*"
+      - ".gitmodules"
+      - "soroban-privacy-pools"
+      - ".github/workflows/npm-publish.yaml"
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: Existing GitHub release whose proving artifacts should be published (skips keygen when present)
+      promote_stable:
+        description: Promote the 1.x line to stable 1.0.0 and move latest (v1 branch only)
+        type: boolean
         required: false
-        default: ""
+        default: false
 
 jobs:
   publish-npm:
@@ -19,7 +30,6 @@ jobs:
     timeout-minutes: 360
     env:
       GIT_LFS_SKIP_SMUDGE: "1"
-      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -27,6 +37,80 @@ jobs:
           submodules: true
           lfs: false
           token: ${{ secrets.SUBMODULE_PAT }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.x"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - name: Resolve release line from branch
+        id: line
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_REF_NAME}"
+          case "$ref" in
+            development) echo "release_line=0" >> "$GITHUB_OUTPUT" ;;
+            v1) echo "release_line=1" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "Unsupported branch for publish: $ref (expected development or v1)" >&2
+              exit 1
+              ;;
+          esac
+      - name: Guard promotion to the 1.x branch
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.promote_stable }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.line.outputs.release_line }}" != "1" ]]; then
+            echo "Manual promotion is only allowed on the v1 branch" >&2
+            exit 1
+          fi
+      - name: Detect whether stable 1.x is already published
+        id: stable1
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if npm view "@arcanetech/stellar-privacy-pool-zk-sdk" versions --json 2>/dev/null \
+            | python3 -c 'import json,sys; versions=json.load(sys.stdin); sys.exit(0 if any(isinstance(v,str) and v.startswith("1.") and "-" not in v for v in versions) else 1)'; then
+            echo "published=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=0" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Select version with the release script
+        id: release
+        env:
+          DRY_RUN: "0"
+          RELEASE_LINE: ${{ steps.line.outputs.release_line }}
+          STABLE_1X_PUBLISHED: ${{ steps.stable1.outputs.published }}
+          PROMOTE_STABLE: ${{ github.event_name == 'workflow_dispatch' && inputs.promote_stable && '1' || '0' }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/*.sh
+          if [[ "${PROMOTE_STABLE}" == "1" ]]; then
+            export COMMIT_MESSAGE="chore: promote"
+          else
+            COMMIT_MESSAGE="$(git log -1 --pretty=%B)"
+            export COMMIT_MESSAGE
+          fi
+          scripts/release-dry-run.sh
+          version="$(python3 -c 'import json; print(json.load(open("client-sdk/package.json"))["version"])')"
+          echo "selected version ${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - name: Commit selected package version
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add client-sdk/package.json
+          if git diff --cached --quiet; then
+            echo "package.json already at ${VERSION}"
+          else
+            git commit -m "ci: release v${VERSION} [skip ci]"
+            git push origin "HEAD:refs/heads/${BRANCH}"
+          fi
       - name: Fetch Hermez ptau
         run: |
           set -euo pipefail
@@ -49,11 +133,12 @@ jobs:
           DO_SPACES_REGION: ${{ vars.DO_SPACES_REGION }}
           ZK_BOOTSTRAP_FROM_VERSION: "0.10.0"
           PTAU_PATH: ${{ github.workspace }}/hermez-ptau/powersOfTau28_hez_final_21.ptau
+          RELEASE_LINE: ${{ steps.line.outputs.release_line }}
+          ZK_CIRCUITS_MANIFEST_OBJECT: ${{ steps.release.outputs.circuits_manifest }}
+          ZK_PACKAGE_VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
           chmod +x scripts/*.sh
-          ZK_PACKAGE_VERSION="$(python3 -c 'import json; print(json.load(open("client-sdk/package.json"))["version"])')"
-          export ZK_PACKAGE_VERSION
           scripts/resolve-zk-rebuild.sh
       - name: Check Spaces credentials
         if: steps.zk-artifacts.outputs.publish_artifacts == 'true'
@@ -74,11 +159,38 @@ jobs:
           if [[ "$missing" -ne 0 ]]; then
             exit 1
           fi
+      - name: Create git tag and GitHub release for artifacts
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "tag ${tag} already exists"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "$tag"
+            git push origin "refs/tags/${tag}"
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "GitHub release ${tag} already exists"
+          else
+            prerelease_args=()
+            if [[ "$VERSION" == *-* ]]; then
+              prerelease_args+=(--prerelease)
+            fi
+            gh release create "$tag" "${prerelease_args[@]}" --title "$tag" --generate-notes
+          fi
       - name: Restore proving artifacts from GitHub release
         id: restore-artifacts
         if: steps.zk-artifacts.outputs.publish_artifacts == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
           tag="${RELEASE_TAG:-}"
@@ -110,11 +222,6 @@ jobs:
           else
             echo "need_keygen=true" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24.x"
-          registry-url: "https://registry.npmjs.org"
-          package-manager-cache: false
       - uses: jetli/wasm-pack-action@v0.4.0
         with:
           version: "v0.15.0"
@@ -160,7 +267,7 @@ jobs:
         if: steps.zk-artifacts.outputs.publish_artifacts == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: scripts/upload-zk-release-assets.sh "${RELEASE_TAG}"
+        run: scripts/upload-zk-release-assets.sh "${{ steps.tag.outputs.tag }}"
       - name: Upload proving artifacts to DigitalOcean Spaces
         if: steps.zk-artifacts.outputs.publish_artifacts == 'true'
         env:
@@ -168,6 +275,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.DO_SPACES_SECRET }}
           DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
           DO_SPACES_REGION: ${{ vars.DO_SPACES_REGION }}
+          RELEASE_LINE: ${{ steps.line.outputs.release_line }}
+          ZK_CIRCUITS_MANIFEST_OBJECT: ${{ steps.release.outputs.circuits_manifest }}
         run: |
           ZK_SUBMODULE_COMMIT="$(git -C soroban-privacy-pools rev-parse HEAD)"
           export ZK_SUBMODULE_COMMIT
@@ -211,15 +320,22 @@ jobs:
             tar -tf "$tarball" >&2
             exit 1
           fi
-      - name: "Publish client-sdk"
+      - name: Publish client-sdk with planned dist-tags
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAGS: ${{ steps.release.outputs.dist_tags }}
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
-          version="$(python3 -c 'import json; print(json.load(open("client-sdk/package.json"))["version"])')"
-          if [[ "$version" == *-* ]]; then
-            tag=next
-          else
-            tag=latest
+          if [[ -z "${DIST_TAGS}" ]]; then
+            echo "release script did not produce dist-tags" >&2
+            exit 1
           fi
-          cd client-sdk && npm publish --access public --tag "$tag"
+          read -r -a tags <<< "${DIST_TAGS}"
+          primary="${tags[0]}"
+          cd client-sdk
+          npm publish --access public --tag "$primary"
+          pkg="$(python3 -c 'import json; print(json.load(open("package.json"))["name"])')"
+          for tag in "${tags[@]:1}"; do
+            npm dist-tag add "${pkg}@${VERSION}" "$tag"
+          done
