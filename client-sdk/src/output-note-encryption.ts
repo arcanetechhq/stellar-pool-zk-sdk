@@ -56,10 +56,10 @@ export type DecryptedOutputNote = OutputNotePlaintext & {
 
 export type OutputNoteEventInput = {
   recipientScalarHex: string;
-  commitmentHashHex: string;
+  commitmentHashHex?: string;
   createdEphemeralKey: readonly [string, string];
   ciphertext: readonly string[];
-  tag: string;
+  tag?: string;
   ownerMode?: bigint;
 };
 
@@ -490,7 +490,10 @@ export async function decryptOutputNoteEvent(
     nonce,
     plaintext: decrypted,
   });
-  if (expectedTag !== bigintFromHex(input.tag)) {
+  if (
+    input.tag !== undefined &&
+    expectedTag !== bigintFromHex(input.tag)
+  ) {
     throw new Error('Output note tag verification failed');
   }
   const plaintext = plaintextFromBigints(decrypted);
@@ -501,6 +504,7 @@ export async function decryptOutputNoteEvent(
     ownerMode: input.ownerMode ?? 0n,
   });
   const commitmentMatches =
+    input.commitmentHashHex === undefined ||
     normalizeHex(input.commitmentHashHex) === commitmentHex;
   if (!commitmentMatches) {
     throw new Error('Output note commitment checksum mismatch');
