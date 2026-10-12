@@ -7,6 +7,7 @@ import type { EcdhSharedKeyFn } from './shared-secret.js';
 import { DOM_ENC, DOM_AUDIT_TAG, DOM_OUTPUT_NOTE_TAG } from './domain-separators.js';
 import { encodeTransactionCiphertextBlob } from './ciphertext-blob.js';
 import type { ZkLayoutParams } from './zk-layout.js';
+import { loadWasm } from './wasm.js';
 
 export const NOTE_OUTPUT_LEN = 6;
 export const NOTE_AUDIT_LEN = 12;
@@ -420,24 +421,24 @@ function ownerPubFromRecipientScalar(
   ];
 }
 
-function commitmentFromPlaintextAndOwnerPub(parameters: {
-  poseidon: Poseidon;
+async function commitmentHexFromPlaintextAndOwnerPub(parameters: {
   plaintext: OutputNotePlaintext;
   ownerPub: readonly [bigint, bigint];
   ownerMode: bigint;
-}): string {
-  const commitment = poseidonHash(parameters.poseidon, [
-    bigintFromDecimal(parameters.plaintext.value),
-    bigintFromDecimal(parameters.plaintext.secret),
-    bigintFromDecimal(parameters.plaintext.nullifier),
-    parameters.ownerPub[0],
-    parameters.ownerPub[1],
-    parameters.ownerMode,
-    bigintFromDecimal(parameters.plaintext.assetHi),
-    bigintFromDecimal(parameters.plaintext.assetLo),
-    bigintFromDecimal(parameters.plaintext.applicationId),
-  ]);
-  return normalizeHex(commitment.toString(16));
+}): Promise<string> {
+  const wasm = await loadWasm();
+  const commitment = wasm.commitmentChainHex(
+    parameters.plaintext.value,
+    parameters.plaintext.secret,
+    parameters.plaintext.nullifier,
+    parameters.ownerPub[0].toString(10),
+    parameters.ownerPub[1].toString(10),
+    parameters.ownerMode.toString(10),
+    parameters.plaintext.assetHi,
+    parameters.plaintext.assetLo,
+    parameters.plaintext.applicationId,
+  ) as string;
+  return normalizeHex(commitment);
 }
 
 export async function commitmentHexFromNoteOpening(input: {
@@ -450,9 +451,8 @@ export async function commitmentHexFromNoteOpening(input: {
   recipientScalarHex: string;
   ownerMode?: bigint;
 }): Promise<string> {
-  const { babyJub, poseidon } = await primitives();
-  return commitmentFromPlaintextAndOwnerPub({
-    poseidon,
+  const { babyJub } = await primitives();
+  return commitmentHexFromPlaintextAndOwnerPub({
     plaintext: {
       value: input.value,
       secret: input.secret,
@@ -497,8 +497,7 @@ export async function decryptOutputNoteEvent(
     throw new Error('Output note tag verification failed');
   }
   const plaintext = plaintextFromBigints(decrypted);
-  const commitmentHex = commitmentFromPlaintextAndOwnerPub({
-    poseidon,
+  const commitmentHex = await commitmentHexFromPlaintextAndOwnerPub({
     plaintext,
     ownerPub: ownerPubFromRecipientScalar(babyJub, input.recipientScalarHex),
     ownerMode: input.ownerMode ?? 0n,

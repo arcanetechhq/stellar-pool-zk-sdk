@@ -120,23 +120,22 @@ const eventTag = frDecimalToHex(encryption.tag);
 const secret = await secretFromDepositEphemeralScalarDecimal(
   deposit.ephemeralKeyScalar,
 );
-const ownerBoundCommitmentHex = (() => {
-  const ownerX = BigInt(`0x${normalizeCoordHex(recipientPoint.x)}`);
-  const ownerY = BigInt(`0x${normalizeCoordHex(recipientPoint.y)}`);
-  const registeredOwnerMode = 0n;
-  const commitment = poseidonHash([
-    1000n,
-    BigInt(secret),
-    501n,
-    ownerX,
-    ownerY,
-    registeredOwnerMode,
-    11n,
-    12n,
-    101n,
-  ]);
-  return commitment.toString(16).padStart(64, '0');
-})();
+const ownerX = BigInt(`0x${normalizeCoordHex(recipientPoint.x)}`);
+const ownerY = BigInt(`0x${normalizeCoordHex(recipientPoint.y)}`);
+const ownerBoundCommitmentHex = wasmModule
+  .commitmentChainHex(
+    '1000',
+    String(secret),
+    '501',
+    ownerX.toString(10),
+    ownerY.toString(10),
+    '0',
+    '11',
+    '12',
+    '101',
+  )
+  .replace(/^0x/i, '')
+  .padStart(64, '0');
 
 const decrypted = await decryptOutputNoteEvent({
   recipientScalarHex,

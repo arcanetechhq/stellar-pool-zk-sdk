@@ -5,8 +5,6 @@ pub mod groth16;
 pub mod merkle;
 pub mod params;
 pub mod poseidon;
-pub mod poseidon_opt;
-pub mod poseidon_opt_params;
 pub mod stealth;
 pub mod utils;
 
@@ -268,7 +266,8 @@ pub fn public_to_hex(public_json: &str) -> String {
     convert::public_to_hex(public_json)
 }
 
-/// Calculate owner-bound nullifier hash from nullifier and spend-scalar decimal strings.
+/// Owner-bound nullifier: Poseidon255(3)(DOM_NULLIFIER_V3, nullifier, Poseidon255(2)(ownerPub)).
+/// `priv_key_scalar_decimal` is the BabyJub spend scalar; ownerPub is scalar·G.
 /// Returns hex string (0x...)
 #[wasm_bindgen(js_name = "calculateNullifierHash")]
 pub fn calculate_nullifier_hash(
@@ -277,6 +276,33 @@ pub fn calculate_nullifier_hash(
 ) -> Result<String, JsValue> {
     coin::calculate_nullifier_hash(nullifier_decimal, priv_key_scalar_decimal)
         .map_err(|e| JsValue::from_str(&e))
+}
+
+/// Five-link Poseidon255(3) commitment. Decimal field strings in, `0x` hex out.
+#[wasm_bindgen(js_name = "commitmentChainHex")]
+pub fn commitment_chain_hex_js(
+    value: &str,
+    secret: &str,
+    nullifier: &str,
+    owner_x: &str,
+    owner_y: &str,
+    owner_mode: &str,
+    asset_hi: &str,
+    asset_lo: &str,
+    application_id: &str,
+) -> Result<String, JsValue> {
+    coin::commitment_chain_hex(
+        value,
+        secret,
+        nullifier,
+        owner_x,
+        owner_y,
+        owner_mode,
+        asset_hi,
+        asset_lo,
+        application_id,
+    )
+    .map_err(|e| JsValue::from_str(&e))
 }
 
 /// UTF-8 seed → `SHA256` → scalar → BabyJubJub `BASE8 * r` (circom `ECDHEphemeralKey`).
