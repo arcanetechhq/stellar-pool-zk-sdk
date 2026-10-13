@@ -84,6 +84,7 @@ export {
   DOM_ENC,
   BABYJUB_SUBGROUP_ORDER,
   canonicalBabyJubScalarFromInteger,
+  reduceDerivedEscrowSpendScalar,
 } from "./domain-separators";
 export { derivedEscrowKey, sampleDerivedEscrowKey } from "./derived-escrow-key";
 export type { DerivedEscrowKey } from "./derived-escrow-key";
@@ -105,6 +106,7 @@ export {
   stellarContractAddressToAssetFrDecimals,
   resolveDepositsForWitness,
   withdrawObjectFromMerkleWitness,
+  withdrawObjectFromEscrowMerkleWitness,
   padDepositSlots,
   padPublicLegs,
   padWithdrawSlots,
@@ -169,6 +171,8 @@ export type {
   ZkLayoutParams,
 } from "./zk-layout";
 export {
+  commitmentHexFromNoteOpening,
+  decryptNoteAuditSlot,
   decryptOutputNoteEvent,
   encryptNoteAuditSlot,
   encryptOutputNoteForDeposit,

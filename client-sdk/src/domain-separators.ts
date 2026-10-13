@@ -5,6 +5,7 @@ export const DOM_ENC = 1346719299n;
 export const DOM_AUDIT_TAG = 1346458695n;
 export const DOM_OUTPUT_NOTE_TAG = 1347310663n;
 export const DOM_COMMITMENT_V3 = 1346582067n;
+export const DOM_COMMITMENT_V4 = 1346582068n;
 export const DOM_NULLIFIER_V3 = 1346917939n;
 export const DOM_SPEND_AUTH_V3 = 1347696179n;
 export const DOM_SPEND_INTENT_V3 = 1346787891n;
@@ -21,4 +22,12 @@ export function canonicalBabyJubScalarFromInteger(value: bigint): bigint {
     return value;
   }
   return (value % (BABYJUB_SUBGROUP_ORDER - 1n)) + 1n;
+}
+
+/**
+ * Escrow sweep spend scalar: reduce the raw derived escrow field element
+ * modulo the BabyJubJub subgroup order so it satisfies `LessThan(l)`.
+ */
+export function reduceDerivedEscrowSpendScalar(derived: bigint): bigint {
+  return derived % BABYJUB_SUBGROUP_ORDER;
 }

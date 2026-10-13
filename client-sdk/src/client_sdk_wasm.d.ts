@@ -57,6 +57,17 @@ declare module 'privacy-pool-client-sdk/pkg/client_sdk_wasm.js' {
     nullifier_decimal: string,
     priv_key_scalar_decimal: string,
   ): string;
+  export function commitmentChainHex(
+    value: string,
+    secret: string,
+    nullifier: string,
+    owner_x: string,
+    owner_y: string,
+    owner_mode: string,
+    asset_hi: string,
+    asset_lo: string,
+    application_id: string,
+  ): string;
   export function derivedEscrowKey(
     nonce_decimal: string,
     recipient_hi_decimal: string,

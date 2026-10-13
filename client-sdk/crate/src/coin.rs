@@ -3,12 +3,15 @@ use ark_ff::PrimeField;
 use serde::{Deserialize, Serialize};
 
 use crate::poseidon::{poseidon_hash_1, poseidon_hash_2, poseidon_hash_3};
-use crate::poseidon_opt::poseidon_hash_n;
 use crate::stealth::parse_scalar_hex;
 use crate::utils::{decimal_to_fr, decimal_to_fr_result, fr_to_bytes_be, fr_to_decimal};
 
-/// Circom `DOM_NULLIFIER` (`0x504E554C`). Must match `circuits/domain_separators.circom`.
+/// Circom `DOM_NULLIFIER` (`0x504E554C` = "PNUL").
 pub const DOM_NULLIFIER: u64 = 0x504E_554C;
+/// Circom `DOM_NULLIFIER_V3` (`0x504E5633` = "PNV3").
+pub const DOM_NULLIFIER_V3: u64 = 1_346_917_939;
+/// Circom `DOM_COMMITMENT_V4` (`0x50435634` = "PCV4").
+pub const DOM_COMMITMENT_V4: u64 = 1_346_582_068;
 
 /// Circom BabyJub `Num2Bits(253)` / `libs/cryptography` `scalar_mul_253`: BE integer < 2^253.
 fn require_scalar_babyjub_range(sb: &[u8; 32]) -> Result<(), String> {
@@ -104,10 +107,26 @@ pub struct StateFile {
 }
 
 /// Privacy-pool leaf hash (matches `circuits/commitment.circom` `CommitmentHasher`):
-/// `ownerKeyHash = Poseidon(ownerPub[0], ownerPub[1])`,
-/// `precommitment = Poseidon(secret, ownerMode, ownerKeyHash)`,
-/// V2 `commitment = Poseidon(9)(value, secret, nullifier, ownerPubX, ownerPubY, ownerMode, asset0, asset1, applicationId)`.
+/// `ownerKeyHash = Poseidon255(2)(ownerPub)`,
+/// `precommitment = Poseidon255(3)(secret, ownerMode, ownerKeyHash)`,
+/// commitment is the five-link `Poseidon255(3)` chain under `DOM_COMMITMENT_V4`.
 /// Registered notes use `owner_mode = 0`.
+pub fn commitment_chain(
+    value: Fr,
+    secret: Fr,
+    nullifier: Fr,
+    owner_pub: OwnerPub,
+    owner_mode: Fr,
+    asset: [Fr; 2],
+    application_id: Fr,
+) -> Fr {
+    let link0 = poseidon_hash_3(Fr::from(DOM_COMMITMENT_V4), value, secret);
+    let link1 = poseidon_hash_3(link0, nullifier, owner_pub.x);
+    let link2 = poseidon_hash_3(link1, owner_pub.y, owner_mode);
+    let link3 = poseidon_hash_3(link2, asset[0], asset[1]);
+    poseidon_hash_3(link3, application_id, Fr::from(0u64))
+}
+
 pub fn commitment_and_precommitment(
     nullifier: Fr,
     value: Fr,
@@ -119,17 +138,15 @@ pub fn commitment_and_precommitment(
 ) -> (Fr, Fr) {
     let owner_key_hash = poseidon_hash_2(owner_pub.x, owner_pub.y);
     let precommitment = poseidon_hash_3(secret, owner_mode, owner_key_hash);
-    let commitment = poseidon_hash_n(&[
+    let commitment = commitment_chain(
         value,
         secret,
         nullifier,
-        owner_pub.x,
-        owner_pub.y,
+        owner_pub,
         owner_mode,
-        asset[0],
-        asset[1],
+        asset,
         application_id,
-    ]);
+    );
     (commitment, precommitment)
 }
 
@@ -396,7 +413,8 @@ pub fn build_withdraw_merkle_witness(
     withdraw_merkle_witness_from_tree(coin, &tree)
 }
 
-/// Calculate owner-bound nullifier hash: Poseidon(DOM_NULLIFIER, nullifier, privKeyScalar).
+/// Owner-bound nullifier: `Poseidon255(3)(DOM_NULLIFIER_V3, nullifier, Poseidon255(2)(ownerPub))`.
+/// `priv_key_scalar_decimal` is the BabyJub spend scalar; the public key is `scalar * G`.
 /// Returns hex string of the hash bytes (32 bytes).
 pub fn calculate_nullifier_hash(
     nullifier_decimal: &str,
@@ -404,10 +422,47 @@ pub fn calculate_nullifier_hash(
 ) -> Result<String, String> {
     let nullifier = decimal_to_fr_result(nullifier_decimal)?;
     let priv_key_scalar = decimal_to_fr_result(priv_key_scalar_decimal)?;
-    let domain = Fr::from(DOM_NULLIFIER);
-    let hash = poseidon_hash_3(domain, nullifier, priv_key_scalar);
+    let scalar_bytes = fr_to_bytes_be(&priv_key_scalar);
+    require_scalar_babyjub_range(&scalar_bytes)?;
+    let (x, y) = cryptography::ecdh_ephemeral_public_key(&scalar_bytes);
+    let owner_key_hash = poseidon_hash_2(
+        Fr::from_be_bytes_mod_order(&x),
+        Fr::from_be_bytes_mod_order(&y),
+    );
+    let hash = poseidon_hash_3(Fr::from(DOM_NULLIFIER_V3), nullifier, owner_key_hash);
     let hash_bytes = fr_to_bytes_be(&hash);
     Ok(format!("0x{}", hex::encode(hash_bytes)))
+}
+
+/// Same five-link commitment as `CommitmentHasher`, hex-encoded (`0x` + 32 bytes).
+pub fn commitment_chain_hex(
+    value: &str,
+    secret: &str,
+    nullifier: &str,
+    owner_x: &str,
+    owner_y: &str,
+    owner_mode: &str,
+    asset_hi: &str,
+    asset_lo: &str,
+    application_id: &str,
+) -> Result<String, String> {
+    let owner_pub = OwnerPub::from_field_elements(
+        decimal_to_fr_result(owner_x)?,
+        decimal_to_fr_result(owner_y)?,
+    );
+    let commitment = commitment_chain(
+        decimal_to_fr_result(value)?,
+        decimal_to_fr_result(secret)?,
+        decimal_to_fr_result(nullifier)?,
+        owner_pub,
+        decimal_to_fr_result(owner_mode)?,
+        [
+            decimal_to_fr_result(asset_hi)?,
+            decimal_to_fr_result(asset_lo)?,
+        ],
+        decimal_to_fr_result(application_id)?,
+    );
+    Ok(format!("0x{}", hex::encode(fr_to_bytes_be(&commitment))))
 }
 
 #[cfg(test)]
@@ -578,17 +633,8 @@ mod tests {
         let a1 = Fr::from(4u64);
         let app_id = Fr::from(0u64);
         let owner_pub = OwnerPub::from_field_elements(Fr::from(10u64), Fr::from(11u64));
-        let expected = poseidon_hash_n(&[
-            v,
-            s,
-            n,
-            owner_pub.x,
-            owner_pub.y,
-            Fr::from(0u64),
-            a0,
-            a1,
-            app_id,
-        ]);
+        let owner_mode = Fr::from(0u64);
+        let expected = commitment_chain(v, s, n, owner_pub, owner_mode, [a0, a1], app_id);
         assert_eq!(
             generate_commitment(n, v, s, owner_pub, [a0, a1], app_id),
             expected

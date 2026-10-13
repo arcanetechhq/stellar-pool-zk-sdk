@@ -528,7 +528,8 @@ export class PrivacyPoolSDK {
   }
 
   /**
-   * Calculate owner-bound nullifier hash: Poseidon(DOM_NULLIFIER, nullifier, privKeyScalar)
+   * Owner-bound nullifier: Poseidon255(3)(DOM_NULLIFIER_V3, nullifier, Poseidon255(2)(ownerPub)).
+   * `privKeyScalar` is the BabyJub spend scalar; ownerPub is scalar·G.
    * @param nullifier Nullifier decimal string from coin data
    * @param privKeyScalar Spend scalar decimal string
    * @returns Hex string (0x...) of the hash bytes

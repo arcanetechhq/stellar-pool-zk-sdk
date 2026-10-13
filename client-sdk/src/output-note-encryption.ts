@@ -7,6 +7,7 @@ import type { EcdhSharedKeyFn } from './shared-secret.js';
 import { DOM_ENC, DOM_AUDIT_TAG, DOM_OUTPUT_NOTE_TAG } from './domain-separators.js';
 import { encodeTransactionCiphertextBlob } from './ciphertext-blob.js';
 import type { ZkLayoutParams } from './zk-layout.js';
+import { loadWasm } from './wasm.js';
 
 export const NOTE_OUTPUT_LEN = 6;
 export const NOTE_AUDIT_LEN = 12;
@@ -56,10 +57,10 @@ export type DecryptedOutputNote = OutputNotePlaintext & {
 
 export type OutputNoteEventInput = {
   recipientScalarHex: string;
-  commitmentHashHex: string;
+  commitmentHashHex?: string;
   createdEphemeralKey: readonly [string, string];
   ciphertext: readonly string[];
-  tag: string;
+  tag?: string;
   ownerMode?: bigint;
 };
 
@@ -208,6 +209,32 @@ function outputNoteTag(parameters: {
   });
 }
 
+function keystreamForOutputNoteField(parameters: {
+  poseidon: Poseidon;
+  nonce: bigint;
+  fieldIndex: number;
+}): bigint {
+  return poseidonHash(parameters.poseidon, [
+    parameters.nonce,
+    STREAM_DOMAIN,
+    BigInt(parameters.fieldIndex),
+  ]);
+}
+
+function keystreamForAuditSlotField(parameters: {
+  poseidon: Poseidon;
+  nonce: bigint;
+  slotIndex: bigint;
+  fieldIndex: number;
+}): bigint {
+  return poseidonHash(parameters.poseidon, [
+    parameters.nonce,
+    STREAM_DOMAIN,
+    parameters.slotIndex,
+    BigInt(parameters.fieldIndex),
+  ]);
+}
+
 function encryptFields(parameters: {
   mimc7: Mimc7;
   poseidon: Poseidon;
@@ -216,17 +243,16 @@ function encryptFields(parameters: {
   plaintext: readonly bigint[];
 }): bigint[] {
   return parameters.plaintext.map((field, index) => {
-    const seed = poseidonHash(parameters.poseidon, [
-      parameters.nonce,
-      STREAM_DOMAIN,
-      BigInt(index),
-    ]);
-    const stream = mimcHash({
+    const keystream = mimcHash({
       mimc7: parameters.mimc7,
-      message: seed,
+      message: keystreamForOutputNoteField({
+        poseidon: parameters.poseidon,
+        nonce: parameters.nonce,
+        fieldIndex: index,
+      }),
       key: parameters.key,
     });
-    return moduleFr(field + stream);
+    return moduleFr(field + keystream);
   });
 }
 
@@ -238,17 +264,62 @@ function decryptFields(parameters: {
   ciphertext: readonly string[];
 }): bigint[] {
   return parameters.ciphertext.map((field, index) => {
-    const seed = poseidonHash(parameters.poseidon, [
-      parameters.nonce,
-      STREAM_DOMAIN,
-      BigInt(index),
-    ]);
-    const stream = mimcHash({
+    const keystream = mimcHash({
       mimc7: parameters.mimc7,
-      message: seed,
+      message: keystreamForOutputNoteField({
+        poseidon: parameters.poseidon,
+        nonce: parameters.nonce,
+        fieldIndex: index,
+      }),
       key: parameters.key,
     });
-    return moduleFr(bigintFromHex(field) - stream);
+    return moduleFr(bigintFromHex(field) - keystream);
+  });
+}
+
+function encryptAuditSlotFields(parameters: {
+  mimc7: Mimc7;
+  poseidon: Poseidon;
+  key: bigint;
+  nonce: bigint;
+  slotIndex: bigint;
+  plaintext: readonly bigint[];
+}): bigint[] {
+  return parameters.plaintext.map((field, index) => {
+    const keystream = mimcHash({
+      mimc7: parameters.mimc7,
+      message: keystreamForAuditSlotField({
+        poseidon: parameters.poseidon,
+        nonce: parameters.nonce,
+        slotIndex: parameters.slotIndex,
+        fieldIndex: index,
+      }),
+      key: parameters.key,
+    });
+    return moduleFr(field + keystream);
+  });
+}
+
+function decryptAuditSlotFields(parameters: {
+  mimc7: Mimc7;
+  poseidon: Poseidon;
+  key: bigint;
+  nonce: bigint;
+  slotIndex: bigint;
+  ciphertext: readonly string[];
+}): bigint[] {
+  return parameters.ciphertext.map((field, index) => {
+    const keystream = mimcHash({
+      mimc7: parameters.mimc7,
+      message: keystreamForAuditSlotField({
+        poseidon: parameters.poseidon,
+        nonce: parameters.nonce,
+        slotIndex: parameters.slotIndex,
+        fieldIndex: index,
+      }),
+      key: parameters.key,
+    });
+    return moduleFr(bigintFromHex(field) - keystream);
   });
 }
 
@@ -350,24 +421,49 @@ function ownerPubFromRecipientScalar(
   ];
 }
 
-function commitmentFromPlaintextAndOwnerPub(parameters: {
-  poseidon: Poseidon;
+async function commitmentHexFromPlaintextAndOwnerPub(parameters: {
   plaintext: OutputNotePlaintext;
   ownerPub: readonly [bigint, bigint];
   ownerMode: bigint;
-}): string {
-  const commitment = poseidonHash(parameters.poseidon, [
-    bigintFromDecimal(parameters.plaintext.value),
-    bigintFromDecimal(parameters.plaintext.secret),
-    bigintFromDecimal(parameters.plaintext.nullifier),
-    parameters.ownerPub[0],
-    parameters.ownerPub[1],
-    parameters.ownerMode,
-    bigintFromDecimal(parameters.plaintext.assetHi),
-    bigintFromDecimal(parameters.plaintext.assetLo),
-    bigintFromDecimal(parameters.plaintext.applicationId),
-  ]);
-  return normalizeHex(commitment.toString(16));
+}): Promise<string> {
+  const wasm = await loadWasm();
+  const commitment = wasm.commitmentChainHex(
+    parameters.plaintext.value,
+    parameters.plaintext.secret,
+    parameters.plaintext.nullifier,
+    parameters.ownerPub[0].toString(10),
+    parameters.ownerPub[1].toString(10),
+    parameters.ownerMode.toString(10),
+    parameters.plaintext.assetHi,
+    parameters.plaintext.assetLo,
+    parameters.plaintext.applicationId,
+  ) as string;
+  return normalizeHex(commitment);
+}
+
+export async function commitmentHexFromNoteOpening(input: {
+  value: string;
+  secret: string;
+  nullifier: string;
+  assetHi: string;
+  assetLo: string;
+  applicationId: string;
+  recipientScalarHex: string;
+  ownerMode?: bigint;
+}): Promise<string> {
+  const { babyJub } = await primitives();
+  return commitmentHexFromPlaintextAndOwnerPub({
+    plaintext: {
+      value: input.value,
+      secret: input.secret,
+      nullifier: input.nullifier,
+      assetHi: input.assetHi,
+      assetLo: input.assetLo,
+      applicationId: input.applicationId,
+    },
+    ownerPub: ownerPubFromRecipientScalar(babyJub, input.recipientScalarHex),
+    ownerMode: input.ownerMode ?? ZERO,
+  });
 }
 
 export async function decryptOutputNoteEvent(
@@ -394,17 +490,20 @@ export async function decryptOutputNoteEvent(
     nonce,
     plaintext: decrypted,
   });
-  if (expectedTag !== bigintFromHex(input.tag)) {
+  if (
+    input.tag !== undefined &&
+    expectedTag !== bigintFromHex(input.tag)
+  ) {
     throw new Error('Output note tag verification failed');
   }
   const plaintext = plaintextFromBigints(decrypted);
-  const commitmentHex = commitmentFromPlaintextAndOwnerPub({
-    poseidon,
+  const commitmentHex = await commitmentHexFromPlaintextAndOwnerPub({
     plaintext,
     ownerPub: ownerPubFromRecipientScalar(babyJub, input.recipientScalarHex),
     ownerMode: input.ownerMode ?? 0n,
   });
   const commitmentMatches =
+    input.commitmentHashHex === undefined ||
     normalizeHex(input.commitmentHashHex) === commitmentHex;
   if (!commitmentMatches) {
     throw new Error('Output note commitment checksum mismatch');
@@ -441,10 +540,30 @@ function precommitmentFromOpening(parameters: {
   ]);
 }
 
+function deriveSharedAuditKey(parameters: {
+  babyJub: BabyJub;
+  poseidon: Poseidon;
+  auditPublicKey: readonly [string, string];
+  auditEphemeralScalar: string;
+  ecdhShared: EcdhSharedKeyFn;
+}): { key: bigint; nonce: bigint } {
+  const [sharedX, sharedY] = sharedKeyFromDepositor({
+    babyJub: parameters.babyJub,
+    ecdhShared: parameters.ecdhShared,
+    ephemeralKeyScalarDecimal: parameters.auditEphemeralScalar,
+    recipientPublicKey: parameters.auditPublicKey,
+  });
+  return {
+    key: deriveEncCipherKey(parameters.poseidon, sharedX),
+    nonce: sharedY,
+  };
+}
+
 export async function encryptNoteAuditSlot(parameters: {
   auditPublicKey: readonly [string, string];
   auditEphemeralScalar: string;
   plaintext: readonly string[];
+  slotIndex: number;
   ecdhShared: EcdhSharedKeyFn;
 }): Promise<{ ciphertext: string[]; tag: string }> {
   if (parameters.plaintext.length !== NOTE_AUDIT_LEN) {
@@ -452,17 +571,26 @@ export async function encryptNoteAuditSlot(parameters: {
       `encryptNoteAuditSlot: expected ${String(NOTE_AUDIT_LEN)} limbs`,
     );
   }
+  if (!Number.isInteger(parameters.slotIndex) || parameters.slotIndex < 0) {
+    throw new Error('encryptNoteAuditSlot: slotIndex must be a non-negative integer');
+  }
   const { babyJub, mimc7, poseidon } = await primitives();
-  const [sharedX, sharedY] = sharedKeyFromDepositor({
+  const { key, nonce } = deriveSharedAuditKey({
     babyJub,
+    poseidon,
+    auditPublicKey: parameters.auditPublicKey,
+    auditEphemeralScalar: parameters.auditEphemeralScalar,
     ecdhShared: parameters.ecdhShared,
-    ephemeralKeyScalarDecimal: parameters.auditEphemeralScalar,
-    recipientPublicKey: parameters.auditPublicKey,
   });
-  const key = deriveEncCipherKey(poseidon, sharedX);
-  const nonce = sharedY;
   const message = parameters.plaintext.map((field) => bigintFromDecimal(field));
-  const ciphertext = encryptFields({ mimc7, poseidon, key, nonce, plaintext: message });
+  const ciphertext = encryptAuditSlotFields({
+    mimc7,
+    poseidon,
+    key,
+    nonce,
+    plaintext: message,
+    slotIndex: BigInt(parameters.slotIndex),
+  });
   const tag = poseidonMacTag({
     poseidon,
     domain: DOM_AUDIT_TAG,
@@ -473,6 +601,53 @@ export async function encryptNoteAuditSlot(parameters: {
   return {
     ciphertext: ciphertext.map((field) => frDecimalFromBigint(field)),
     tag: frDecimalFromBigint(tag),
+  };
+}
+
+export async function decryptNoteAuditSlot(parameters: {
+  auditPublicKey: readonly [string, string];
+  auditEphemeralScalar: string;
+  ciphertext: readonly string[];
+  tag: string;
+  slotIndex: number;
+  ecdhShared: EcdhSharedKeyFn;
+}): Promise<{ plaintext: string[] }> {
+  if (parameters.ciphertext.length !== NOTE_AUDIT_LEN) {
+    throw new Error(
+      `decryptNoteAuditSlot: expected ${String(NOTE_AUDIT_LEN)} limbs`,
+    );
+  }
+  if (!Number.isInteger(parameters.slotIndex) || parameters.slotIndex < 0) {
+    throw new Error('decryptNoteAuditSlot: slotIndex must be a non-negative integer');
+  }
+  const { babyJub, mimc7, poseidon } = await primitives();
+  const { key, nonce } = deriveSharedAuditKey({
+    babyJub,
+    poseidon,
+    auditPublicKey: parameters.auditPublicKey,
+    auditEphemeralScalar: parameters.auditEphemeralScalar,
+    ecdhShared: parameters.ecdhShared,
+  });
+  const decrypted = decryptAuditSlotFields({
+    mimc7,
+    poseidon,
+    key,
+    nonce,
+    ciphertext: parameters.ciphertext,
+    slotIndex: BigInt(parameters.slotIndex),
+  });
+  const expectedTag = poseidonMacTag({
+    poseidon,
+    domain: DOM_AUDIT_TAG,
+    key,
+    nonce,
+    message: decrypted,
+  });
+  if (expectedTag !== bigintFromHex(parameters.tag)) {
+    throw new Error('Audit slot tag verification failed');
+  }
+  return {
+    plaintext: decrypted.map((field) => frDecimalFromBigint(field)),
   };
 }
 
@@ -582,6 +757,7 @@ export async function encryptTransactionCiphertextBlob(parameters: {
       auditPublicKey: parameters.witness.noteAuditPublicKey,
       auditEphemeralScalar: parameters.witness.auditEphemeralScalar,
       plaintext,
+      slotIndex: slot,
       ecdhShared: parameters.ecdhShared,
     });
     auditCiphertexts.push(encrypted.ciphertext);
