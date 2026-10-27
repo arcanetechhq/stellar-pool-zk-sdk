@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {
   BABYJUB_SUBGROUP_ORDER,
   sampleDerivedEscrowKey,
-} from '../dist/index.mjs';
+} from '../dist/index.node.mjs';
 
 const MIN_RANDOM_NONCE = 1n << 127n;
 

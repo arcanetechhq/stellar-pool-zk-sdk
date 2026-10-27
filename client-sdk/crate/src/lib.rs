@@ -371,6 +371,140 @@ pub fn derived_escrow_key_js(
     .map_err(|e| JsValue::from_str(&format!("{e}")))
 }
 
+/// Witness map plus Groth16 blinding scalars. MSM bases stay in `exportMsmBases`.
+#[wasm_bindgen]
+pub struct PreparedGroth16 {
+    scalars: Vec<u8>,
+    public_hex: String,
+}
+
+#[wasm_bindgen]
+impl PreparedGroth16 {
+    #[wasm_bindgen(getter)]
+    pub fn scalars(&self) -> Vec<u8> {
+        self.scalars.clone()
+    }
+
+    #[wasm_bindgen(getter, js_name = publicHex)]
+    pub fn public_hex(&self) -> String {
+        self.public_hex.clone()
+    }
+}
+
+/// Graph witness, public signals, and the scalar vectors for a chunked MSM.
+#[wasm_bindgen(js_name = "prepareGroth16")]
+pub fn prepare_groth16(
+    graph: &[u8],
+    proving_key: &[u8],
+    r1cs: &[u8],
+    inputs_json: &str,
+) -> Result<PreparedGroth16, JsValue> {
+    let calc = groth16::witness::WitnessCalculator::from_graph(graph)
+        .map_err(|e| JsValue::from_str(&format!("witness graph: {e:#}")))?;
+    let witness = calc
+        .compute_witness(inputs_json)
+        .map_err(|e| JsValue::from_str(&format!("witness: {e:#}")))?;
+    let (scalars, public_le) =
+        groth16::prover::Prover::with_cached(proving_key, r1cs, |prover| {
+            let scalars = prover.prepare_scalar_bytes(&witness)?;
+            let public_le = prover.extract_public_inputs(&witness)?;
+            Ok((scalars, public_le))
+        })
+        .map_err(|e| JsValue::from_str(&format!("prepare: {e:#}")))?;
+    let public_hex = groth16::prover::public_inputs_le_to_soroban_hex(&public_le)
+        .map_err(|e| JsValue::from_str(&format!("public hex: {e:#}")))?;
+    Ok(PreparedGroth16 {
+        scalars,
+        public_hex,
+    })
+}
+
+/// Uncompressed MSM bases and the Groth16 constants used by `finishGroth16`.
+#[wasm_bindgen(js_name = "exportMsmBases")]
+pub fn export_msm_bases(proving_key: &[u8], r1cs: &[u8]) -> Result<Vec<u8>, JsValue> {
+    groth16::prover::Prover::with_cached(proving_key, r1cs, |prover| prover.export_base_bytes())
+        .map_err(|e| JsValue::from_str(&format!("export bases: {e:#}")))
+}
+
+#[wasm_bindgen(js_name = "msmG1")]
+pub fn msm_g1(bases: &[u8], scalars: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let bases = groth16::shard::decode_g1_points(bases)
+        .map_err(|e| JsValue::from_str(&format!("g1 bases: {e:#}")))?;
+    let scalars = groth16::shard::decode_scalars(scalars)
+        .map_err(|e| JsValue::from_str(&format!("scalars: {e:#}")))?;
+    let point = groth16::shard::msm_g1(&bases, &scalars)
+        .map_err(|e| JsValue::from_str(&format!("msm g1: {e:#}")))?;
+    Ok(groth16::shard::encode_g1_projective(&point).to_vec())
+}
+
+#[wasm_bindgen(js_name = "msmG2")]
+pub fn msm_g2(bases: &[u8], scalars: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let bases = groth16::shard::decode_g2_points(bases)
+        .map_err(|e| JsValue::from_str(&format!("g2 bases: {e:#}")))?;
+    let scalars = groth16::shard::decode_scalars(scalars)
+        .map_err(|e| JsValue::from_str(&format!("scalars: {e:#}")))?;
+    let point = groth16::shard::msm_g2(&bases, &scalars)
+        .map_err(|e| JsValue::from_str(&format!("msm g2: {e:#}")))?;
+    Ok(groth16::shard::encode_g2_projective(&point).to_vec())
+}
+
+#[wasm_bindgen(js_name = "sumG1")]
+pub fn sum_g1(points: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let decoded = groth16::shard::decode_g1_points(points)
+        .map_err(|e| JsValue::from_str(&format!("g1 points: {e:#}")))?;
+    let projective = decoded
+        .iter()
+        .map(|point| (*point).into())
+        .collect::<Vec<ark_bn254_zk::G1Projective>>();
+    Ok(groth16::shard::encode_g1_projective(&groth16::shard::sum_g1(&projective)).to_vec())
+}
+
+#[wasm_bindgen(js_name = "sumG2")]
+pub fn sum_g2(points: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let decoded = groth16::shard::decode_g2_points(points)
+        .map_err(|e| JsValue::from_str(&format!("g2 points: {e:#}")))?;
+    let projective = decoded
+        .iter()
+        .map(|point| (*point).into())
+        .collect::<Vec<ark_bn254_zk::G2Projective>>();
+    Ok(groth16::shard::encode_g2_projective(&groth16::shard::sum_g2(&projective)).to_vec())
+}
+
+/// Add Groth16 blinding to the summed MSM points. Returns the 256-byte proof.
+#[wasm_bindgen(js_name = "finishGroth16")]
+pub fn finish_groth16(
+    constants: &[u8],
+    a_acc: &[u8],
+    b_g1_acc: &[u8],
+    b_g2_acc: &[u8],
+    h_acc: &[u8],
+    l_acc: &[u8],
+    r: &[u8],
+    s: &[u8],
+) -> Result<Vec<u8>, JsValue> {
+    let constants = groth16::shard::decode_constants(constants)
+        .map_err(|e| JsValue::from_str(&format!("constants: {e:#}")))?;
+    let a = groth16::shard::decode_g1_projective(a_acc)
+        .map_err(|e| JsValue::from_str(&format!("A: {e:#}")))?;
+    let b_g1 = groth16::shard::decode_g1_projective(b_g1_acc)
+        .map_err(|e| JsValue::from_str(&format!("B G1: {e:#}")))?;
+    let b_g2 = groth16::shard::decode_g2_projective(b_g2_acc)
+        .map_err(|e| JsValue::from_str(&format!("B G2: {e:#}")))?;
+    let h = groth16::shard::decode_g1_projective(h_acc)
+        .map_err(|e| JsValue::from_str(&format!("H: {e:#}")))?;
+    let l = groth16::shard::decode_g1_projective(l_acc)
+        .map_err(|e| JsValue::from_str(&format!("L: {e:#}")))?;
+    let r = groth16::shard::decode_scalars(r)
+        .map_err(|e| JsValue::from_str(&format!("r: {e:#}")))?;
+    let s = groth16::shard::decode_scalars(s)
+        .map_err(|e| JsValue::from_str(&format!("s: {e:#}")))?;
+    let (Some(r), Some(s)) = (r.first().copied(), s.first().copied()) else {
+        return Err(JsValue::from_str("r and s must each be one field element"));
+    };
+    let proof = groth16::shard::finish(&constants, a, b_g1, b_g2, h, l, r, s);
+    Ok(groth16::prover::proof_to_uncompressed_bytes(&proof))
+}
+
 /// Graph witness + arkworks Groth16 prove. Returns `{ proof_hex, public_hex }`.
 #[wasm_bindgen(js_name = "proveGroth16")]
 pub fn prove_groth16(
@@ -384,14 +518,13 @@ pub fn prove_groth16(
     let witness = calc
         .compute_witness(inputs_json)
         .map_err(|e| JsValue::from_str(&format!("witness: {e:#}")))?;
-    let prover = groth16::prover::Prover::new(proving_key, r1cs)
-        .map_err(|e| JsValue::from_str(&format!("prover init: {e:#}")))?;
-    let proof_bytes = prover
-        .prove_bytes_uncompressed(&witness)
+    let (proof_bytes, public_le) =
+        groth16::prover::Prover::with_cached(proving_key, r1cs, |prover| {
+            let proof_bytes = prover.prove_bytes_uncompressed(&witness)?;
+            let public_le = prover.extract_public_inputs(&witness)?;
+            Ok((proof_bytes, public_le))
+        })
         .map_err(|e| JsValue::from_str(&format!("prove: {e:#}")))?;
-    let public_le = prover
-        .extract_public_inputs(&witness)
-        .map_err(|e| JsValue::from_str(&format!("public inputs: {e:#}")))?;
     let public_hex = groth16::prover::public_inputs_le_to_soroban_hex(&public_le)
         .map_err(|e| JsValue::from_str(&format!("public hex: {e:#}")))?;
     #[derive(serde::Serialize)]
