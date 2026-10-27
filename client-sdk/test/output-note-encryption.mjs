@@ -11,7 +11,7 @@ globalThis.Worker ??= class Worker {
 };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const sdkPath = join(root, 'dist/index.mjs');
+const sdkPath = join(root, 'dist/index.node.mjs');
 const wasmJsPath = join(root, 'pkg/client_sdk_wasm.js');
 const wasmBinaryPath = join(root, 'pkg/client_sdk_wasm_bg.wasm');
 

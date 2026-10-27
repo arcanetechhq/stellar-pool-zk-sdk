@@ -133,6 +133,24 @@ function sdkPlugins(options) {
                   "src/fetch-artifact.browser.ts",
                 ),
               },
+              {
+                find: /^(?:\.\/)?wasm(?:\.js)?$/,
+                replacement: path.join(__dirname, "src/wasm.browser.ts"),
+              },
+              {
+                find: /^(?:\.\/)?groth16\/pool(?:\.js)?$/,
+                replacement: path.join(
+                  __dirname,
+                  "src/groth16/pool.browser.ts",
+                ),
+              },
+              {
+                find: /^(?:\.\/)?groth16\/prover-host(?:\.js)?$/,
+                replacement: path.join(
+                  __dirname,
+                  "src/groth16/prover-host.browser.ts",
+                ),
+              },
             ]
           : []),
       ],
@@ -221,4 +239,120 @@ const cliConfig = {
   ],
 };
 
-export default [browserSdkConfig, nodeSdkConfig, cliConfig];
+const workerPlugins = [
+  alias({
+    entries: [{ find: "privacy-pool-client-sdk", replacement: __dirname }],
+  }),
+  wasmPack(),
+  typescript({
+    tsconfig: "./tsconfig.json",
+    declaration: false,
+  }),
+  resolve({ browser: true, preferBuiltins: false }),
+  commonjs(),
+];
+
+function copyWorkerWasm() {
+  return {
+    name: "copy-worker-wasm",
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "client_sdk_wasm_bg.wasm",
+        source: fs.readFileSync(
+          path.join(__dirname, "pkg/client_sdk_wasm_bg.wasm"),
+        ),
+      });
+    },
+  };
+}
+
+const browserWorkerConfig = {
+  input: "src/groth16/worker.browser.ts",
+  output: {
+    file: "dist/groth16-worker.mjs",
+    format: "es",
+    sourcemap: true,
+  },
+  plugins: [...workerPlugins, copyWorkerWasm()],
+};
+
+const nodeWorkerConfig = {
+  input: "src/groth16/worker.node.ts",
+  output: {
+    file: "dist/groth16-worker.node.mjs",
+    format: "es",
+    sourcemap: true,
+  },
+  external: nodeBuiltins,
+  plugins: [
+    alias({
+      entries: [{ find: "privacy-pool-client-sdk", replacement: __dirname }],
+    }),
+    wasmPack(),
+    typescript({
+      tsconfig: "./tsconfig.json",
+      declaration: false,
+    }),
+    resolve({ preferBuiltins: true }),
+    commonjs(),
+  ],
+};
+
+const browserProverWorkerConfig = {
+  input: "src/groth16/prover-worker.browser.ts",
+  output: {
+    file: "dist/prover-worker.mjs",
+    format: "es",
+    sourcemap: true,
+  },
+  plugins: workerPlugins,
+};
+
+const nodeProverWorkerConfig = {
+  input: "src/groth16/prover-worker.node.ts",
+  output: {
+    file: "dist/prover-worker.node.mjs",
+    format: "es",
+    sourcemap: true,
+  },
+  external: nodeBuiltins,
+  plugins: [
+    alias({
+      entries: [{ find: "privacy-pool-client-sdk", replacement: __dirname }],
+    }),
+    wasmPack(),
+    typescript({
+      tsconfig: "./tsconfig.json",
+      declaration: false,
+    }),
+    resolve({ preferBuiltins: true }),
+    commonjs(),
+  ],
+};
+
+const scheduleConfig = {
+  input: "src/groth16/schedule.ts",
+  output: {
+    file: "dist/groth16-schedule.mjs",
+    format: "es",
+    sourcemap: true,
+  },
+  plugins: [
+    typescript({
+      tsconfig: "./tsconfig.json",
+      declaration: false,
+    }),
+  ],
+};
+
+export default [
+  browserSdkConfig,
+  nodeSdkConfig,
+  cliConfig,
+  browserWorkerConfig,
+  nodeWorkerConfig,
+  browserProverWorkerConfig,
+  nodeProverWorkerConfig,
+  scheduleConfig,
+];
