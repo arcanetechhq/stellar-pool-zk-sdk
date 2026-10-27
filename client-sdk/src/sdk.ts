@@ -1,4 +1,10 @@
+import { measureStage } from "./measure-stage";
 import { loadWasm } from "./wasm";
+import { proveGroth16Parallel } from "./groth16/prove";
+import { createGroth16Pool } from "./groth16/pool";
+import { openProver } from "./groth16/prover-host";
+import type { ProverHost } from "./groth16/prover-protocol";
+import type { Groth16Pool } from "./groth16/protocol";
 import { resolveCircuitArtifacts } from "./circuit-artifacts";
 import type {
   CoinData,
@@ -116,6 +122,10 @@ export class PrivacyPoolSDK {
   private circuitArtifacts:
     | Awaited<ReturnType<typeof resolveCircuitArtifacts>>
     | undefined;
+  private groth16Pool: Groth16Pool | null = null;
+  private proverHost: ProverHost | null = null;
+  private basesExport: Promise<Uint8Array | null> | null = null;
+  private msmBases: Uint8Array | null = null;
 
   private constructor(
     wasm: any,
@@ -162,7 +172,35 @@ export class PrivacyPoolSDK {
       resolved.config,
       opts.zkArtifactBaseUrl,
     );
+    sdk.startBaseExport();
     return sdk;
+  }
+
+  /** Decompress the proving key off the UI thread as soon as artifacts exist. */
+  private startBaseExport(): void {
+    const artifacts = this.circuitArtifacts;
+    if (!artifacts) {
+      return;
+    }
+    try {
+      const session = openProver(
+        this.options.wasmBinary,
+        artifacts.provingKey,
+        artifacts.r1cs,
+      );
+      this.proverHost = session.host;
+      this.basesExport = session.bases
+        .then((bases) => {
+          this.msmBases = bases;
+          return bases;
+        })
+        .catch((error: unknown) => {
+          console.warn("Groth16 base export failed", error);
+          return null;
+        });
+    } catch (error) {
+      console.warn("Groth16 base export failed", error);
+    }
   }
 
   /**
@@ -493,32 +531,54 @@ export class PrivacyPoolSDK {
       ecdhEphemeralPublicKeyFromScalarHex: (h) =>
         this.wasm.ecdhEphemeralPublicKeyFromScalarHex(h),
     };
-    const { nIns, nOuts, publicNInputs, publicNOutputs } =
-      this.layout;
-    const witnessInput = buildTransactionWitnessInput(
-      publicParams,
-      publicLegs,
-      withdraws,
-      deposits,
-      audit,
-      wasmEcdh,
-      { nIns, nOuts, publicNInputs, publicNOutputs },
+    const { nIns, nOuts, publicNInputs, publicNOutputs } = this.layout;
+    const witnessInput = await measureStage("witness", () =>
+      buildTransactionWitnessInput(
+        publicParams,
+        publicLegs,
+        withdraws,
+        deposits,
+        audit,
+        wasmEcdh,
+        { nIns, nOuts, publicNInputs, publicNOutputs },
+      ),
     );
     const artifacts = this.circuitArtifacts;
     if (!artifacts) {
       throw new Error("PrivacyPoolSDK circuit artifacts are not loaded");
     }
-    const proved = this.wasm.proveGroth16(
-      artifacts.graph,
-      artifacts.provingKey,
-      artifacts.r1cs,
-      JSON.stringify(witnessInput),
-    ) as { proof_hex: string; public_hex: string };
-    const encrypted = await encryptTransactionCiphertextBlob({
-      witness: witnessInput,
-      layout: this.layout,
-      ecdhShared: (priv, pubX, pubY) => this.wasm.ecdhSharedKey(priv, pubX, pubY),
+    const groth16Pool =
+      this.groth16Pool ?? createGroth16Pool(this.options.wasmBinary);
+    this.groth16Pool = groth16Pool;
+    const pendingBases = this.basesExport;
+    if (!this.msmBases && pendingBases) {
+      this.msmBases = await measureStage("exportBases", () => pendingBases);
+    }
+    const proved = await measureStage("groth16", async () => {
+      const result = await proveGroth16Parallel({
+        wasm: this.wasm,
+        pool: groth16Pool,
+        host: this.proverHost,
+        graph: artifacts.graph,
+        provingKey: artifacts.provingKey,
+        r1cs: artifacts.r1cs,
+        inputsJson: JSON.stringify(witnessInput),
+        cachedBases: this.msmBases,
+      });
+      this.msmBases = result.bases;
+      return {
+        proof_hex: result.proof_hex,
+        public_hex: result.public_hex,
+      };
     });
+    const encrypted = await measureStage("encrypt", () =>
+      encryptTransactionCiphertextBlob({
+        witness: witnessInput,
+        layout: this.layout,
+        ecdhShared: (priv, pubX, pubY) =>
+          this.wasm.ecdhSharedKey(priv, pubX, pubY),
+      }),
+    );
     return {
       proof_hex: proved.proof_hex,
       public_hex: proved.public_hex,
