@@ -4,7 +4,7 @@ use crate::groth16::circom_reduction::CircomReduction;
 use crate::groth16::r1cs::R1CS;
 use anyhow::{anyhow, Result};
 use ark_bn254_zk::{Bn254, Fr, G1Affine, G2Affine};
-use ark_ff_zk::{AdditiveGroup, BigInteger, Field, PrimeField};
+use ark_ff_zk::{AdditiveGroup, BigInteger, Field, PrimeField, UniformRand};
 use ark_groth16::{PreparedVerifyingKey, Proof, ProvingKey};
 use ark_relations::{
     gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable},
@@ -14,10 +14,11 @@ use ark_serialize_zk::CanonicalDeserialize;
 use ark_snark::SNARK;
 use ark_std::rand::rngs::OsRng;
 use core::ops::AddAssign;
+use std::cell::RefCell;
 
 pub const FIELD_SIZE: usize = 32;
 
-fn bytes_to_fr(bytes: &[u8]) -> Result<Fr> {
+pub(crate) fn bytes_to_fr(bytes: &[u8]) -> Result<Fr> {
     if bytes.len() != FIELD_SIZE {
         return Err(anyhow!(
             "Expected {} bytes, got {}",
@@ -36,14 +37,14 @@ fn bigint_to_be_32<B: BigInteger>(value: B) -> [u8; 32] {
     out
 }
 
-fn g1_bytes_uncompressed(p: &G1Affine) -> [u8; 64] {
+pub(crate) fn g1_bytes_uncompressed(p: &G1Affine) -> [u8; 64] {
     let mut out = [0u8; 64];
     out[..32].copy_from_slice(&bigint_to_be_32(p.x.into_bigint()));
     out[32..].copy_from_slice(&bigint_to_be_32(p.y.into_bigint()));
     out
 }
 
-fn g2_bytes_uncompressed(p: &G2Affine) -> [u8; 128] {
+pub(crate) fn g2_bytes_uncompressed(p: &G2Affine) -> [u8; 128] {
     let mut out = [0u8; 128];
     let x0 = bigint_to_be_32(p.x.c0.into_bigint());
     let x1 = bigint_to_be_32(p.x.c1.into_bigint());
@@ -56,7 +57,7 @@ fn g2_bytes_uncompressed(p: &G2Affine) -> [u8; 128] {
     out
 }
 
-fn proof_to_uncompressed_bytes(proof: &Proof<Bn254>) -> Vec<u8> {
+pub(crate) fn proof_to_uncompressed_bytes(proof: &Proof<Bn254>) -> Vec<u8> {
     let mut out = Vec::with_capacity(256);
     out.extend_from_slice(&g1_bytes_uncompressed(&proof.a));
     out.extend_from_slice(&g2_bytes_uncompressed(&proof.b));
@@ -155,7 +156,56 @@ pub struct Prover {
     r1cs: R1CS,
 }
 
+struct ProverCache {
+    pk_fingerprint: (u64, usize),
+    r1cs_fingerprint: (u64, usize),
+    prover: Prover,
+}
+
+thread_local! {
+    static PROVER_CACHE: RefCell<Option<ProverCache>> = RefCell::new(None);
+}
+
+fn fingerprint(bytes: &[u8]) -> (u64, usize) {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    (hash, bytes.len())
+}
+
 impl Prover {
+    /// Reuse the decompressed proving key when the same bytes are loaded again.
+    pub fn with_cached<T>(
+        pk_bytes: &[u8],
+        r1cs_bytes: &[u8],
+        use_prover: impl FnOnce(&Prover) -> Result<T>,
+    ) -> Result<T> {
+        let pk_fingerprint = fingerprint(pk_bytes);
+        let r1cs_fingerprint = fingerprint(r1cs_bytes);
+        PROVER_CACHE.with(|slot| {
+            {
+                let cached = slot.borrow();
+                if let Some(hit) = cached.as_ref() {
+                    if hit.pk_fingerprint == pk_fingerprint
+                        && hit.r1cs_fingerprint == r1cs_fingerprint
+                    {
+                        return use_prover(&hit.prover);
+                    }
+                }
+            }
+            let prover = Prover::new(pk_bytes, r1cs_bytes)?;
+            let result = use_prover(&prover);
+            *slot.borrow_mut() = Some(ProverCache {
+                pk_fingerprint,
+                r1cs_fingerprint,
+                prover,
+            });
+            result
+        })
+    }
+
     pub fn new(pk_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<Prover> {
         let pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(pk_bytes)
             .map_err(|e| anyhow!("Failed to load proving key: {}", e))?;
@@ -205,6 +255,52 @@ impl Prover {
         Ok(proof_to_uncompressed_bytes(&proof))
     }
 
+    pub fn prepare_scalar_bytes(&self, witness_bytes: &[u8]) -> Result<Vec<u8>> {
+        let witness = witness_field_elements(witness_bytes, self.r1cs.num_wires as usize)?;
+        let mut rng = OsRng;
+        let prepared = crate::groth16::shard::prepare_circuit(
+            R1CSCircuit {
+                r1cs: self.r1cs.clone(),
+                witness,
+            },
+            Fr::rand(&mut rng),
+            Fr::rand(&mut rng),
+        )?;
+        let query_len = self.pk.a_query.len();
+        if query_len == 0
+            || self.pk.b_g1_query.len() != query_len
+            || self.pk.b_g2_query.len() != query_len
+        {
+            return Err(anyhow!(
+                "proving key query lengths differ: a {}, b_g1 {}, b_g2 {}",
+                query_len,
+                self.pk.b_g1_query.len(),
+                self.pk.b_g2_query.len()
+            ));
+        }
+        let assignment_len = query_len - 1;
+        if prepared.assignment.len() != assignment_len
+            || prepared.h.len() != self.pk.h_query.len()
+            || prepared.aux.len() != self.pk.l_query.len()
+        {
+            return Err(anyhow!(
+                "prepared scalars do not match proving key queries: assignment {}/{}, h {}/{}, aux {}/{}",
+                prepared.assignment.len(),
+                assignment_len,
+                prepared.h.len(),
+                self.pk.h_query.len(),
+                prepared.aux.len(),
+                self.pk.l_query.len()
+            ));
+        }
+        Ok(crate::groth16::shard::encode_scalars(&prepared))
+    }
+
+    pub fn export_base_bytes(&self) -> Result<Vec<u8>> {
+        let bases = crate::groth16::shard::bases_from_proving_key(&self.pk)?;
+        Ok(crate::groth16::shard::encode_bases(&bases))
+    }
+
     pub fn extract_public_inputs(&self, witness_bytes: &[u8]) -> Result<Vec<u8>> {
         if !witness_bytes.len().is_multiple_of(FIELD_SIZE) {
             return Err(anyhow!("Invalid witness size"));
@@ -226,6 +322,29 @@ impl Prover {
         }
         Ok(witness_bytes[start..end].to_vec())
     }
+}
+
+fn witness_field_elements(witness_bytes: &[u8], num_wires: usize) -> Result<Vec<Fr>> {
+    if !witness_bytes.len().is_multiple_of(FIELD_SIZE) {
+        return Err(anyhow!(
+            "Invalid witness size: {} bytes (not multiple of {})",
+            witness_bytes.len(),
+            FIELD_SIZE
+        ));
+    }
+    let num_witness_elements = witness_bytes.len() / FIELD_SIZE;
+    if num_witness_elements < num_wires {
+        return Err(anyhow!(
+            "Witness too short: {} elements, circuit needs {} wires",
+            num_witness_elements,
+            num_wires
+        ));
+    }
+    let mut witness = Vec::with_capacity(num_witness_elements);
+    for chunk in witness_bytes.chunks_exact(FIELD_SIZE) {
+        witness.push(bytes_to_fr(chunk)?);
+    }
+    Ok(witness)
 }
 
 /// Encode Circom public inputs (LE Frs) as Soroban `public_hex`: u32 BE count + BE-32 fields.

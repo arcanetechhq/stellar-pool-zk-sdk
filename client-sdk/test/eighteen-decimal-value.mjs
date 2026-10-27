@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PrivacyPoolSDK } from '../dist/index.mjs';
+import { PrivacyPoolSDK } from '../dist/index.node.mjs';
 
 const EIGHTEEN_DECIMAL_PLUS_ONE = '1000000000000000001';
 const ASSET_HI = '1';

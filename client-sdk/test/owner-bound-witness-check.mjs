@@ -9,7 +9,7 @@ import {
   resolveTransactionAuditParams,
   DEMO_AUDIT_PUBLIC_KEY,
   DEFAULT_APPLICATION_ID,
-} from '../dist/index.mjs';
+} from '../dist/index.node.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
