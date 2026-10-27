@@ -305,6 +305,47 @@ pub fn commitment_chain_hex_js(
     .map_err(|e| JsValue::from_str(&e))
 }
 
+#[wasm_bindgen(js_name = "commitmentChainHexWithAccumulator")]
+pub fn commitment_chain_hex_with_accumulator_js(
+    value: &str,
+    secret: &str,
+    nullifier: &str,
+    owner_x: &str,
+    owner_y: &str,
+    owner_mode: &str,
+    asset_hi: &str,
+    asset_lo: &str,
+    application_id: &str,
+    accumulator: &str,
+) -> Result<String, JsValue> {
+    coin::commitment_chain_hex_with_accumulator(
+        value,
+        secret,
+        nullifier,
+        owner_x,
+        owner_y,
+        owner_mode,
+        asset_hi,
+        asset_lo,
+        application_id,
+        accumulator,
+    )
+    .map_err(|e| JsValue::from_str(&e))
+}
+
+#[wasm_bindgen(js_name = "poseidon1Decimal")]
+pub fn poseidon1_decimal_js(value: &str) -> Result<String, JsValue> {
+    let field = decimal_to_fr_result(value).map_err(|e| JsValue::from_str(&e))?;
+    Ok(utils::fr_to_decimal(&poseidon::poseidon_hash_1(field)))
+}
+
+#[wasm_bindgen(js_name = "poseidon2Decimal")]
+pub fn poseidon2_decimal_js(left: &str, right: &str) -> Result<String, JsValue> {
+    let a = decimal_to_fr_result(left).map_err(|e| JsValue::from_str(&e))?;
+    let b = decimal_to_fr_result(right).map_err(|e| JsValue::from_str(&e))?;
+    Ok(utils::fr_to_decimal(&poseidon::poseidon_hash_2(a, b)))
+}
+
 /// UTF-8 seed → `SHA256` → scalar → BabyJubJub `BASE8 * r` (circom `ECDHEphemeralKey`).
 /// `x` and `y` are lowercase hex (no `0x`). Bech32 / stealth string: TypeScript `encodeStealthAddress`.
 #[wasm_bindgen(js_name = "ecdhEphemeralPublicKey")]

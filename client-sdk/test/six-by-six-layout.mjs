@@ -20,7 +20,7 @@ assert.equal(layout.nOuts, 6);
 assert.equal(layout.nAuditSlots, 12);
 assert.equal(layout.auditOffset, 24);
 assert.equal(layout.outputNoteOffset, 38);
-assert.equal(totalPublicSignals(layout), 57);
+assert.equal(totalPublicSignals(layout), 58);
 assert.deepEqual(layoutForKnownNonce(SIX_BY_SIX_BINDING_ZK_NONCE), layout);
 
 const audit = resolveTransactionAuditParams('101', undefined, 12);
@@ -65,8 +65,8 @@ assert.equal(witness.noteAuditPublicKey.length, 2);
 assert.equal(witness.depositedValues[0], '1');
 assert.equal(witness.depositedValues[1], '0');
 
-const signalsA = Buffer.alloc(57 * 32);
-const signalsB = Buffer.alloc(57 * 32);
+const signalsA = Buffer.alloc(58 * 32);
+const signalsB = Buffer.alloc(58 * 32);
 signalsA[44 * 32 + 31] = 1;
 signalsB[44 * 32 + 31] = 2;
 assert.equal(
