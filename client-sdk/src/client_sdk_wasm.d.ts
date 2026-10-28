@@ -68,6 +68,20 @@ declare module 'privacy-pool-client-sdk/pkg/client_sdk_wasm.js' {
     asset_lo: string,
     application_id: string,
   ): string;
+  export function commitmentChainHexWithAccumulator(
+    value: string,
+    secret: string,
+    nullifier: string,
+    owner_x: string,
+    owner_y: string,
+    owner_mode: string,
+    asset_hi: string,
+    asset_lo: string,
+    application_id: string,
+    accumulator: string,
+  ): string;
+  export function poseidon1Decimal(value: string): string;
+  export function poseidon2Decimal(left: string, right: string): string;
   export function derivedEscrowKey(
     nonce_decimal: string,
     recipient_hi_decimal: string,

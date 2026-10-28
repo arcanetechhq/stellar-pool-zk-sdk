@@ -166,8 +166,11 @@ export function createProverClient(spawn: () => ProverPort): ProverHost {
   };
 }
 
+/** Node `Buffer#slice` shares memory, so transferring its buffer would detach the caller's artifact. */
 function copyBytes(bytes: Uint8Array): ArrayBuffer {
-  return bytes.slice().buffer;
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
 }
 
 function fingerprint(bytes: Uint8Array): string {

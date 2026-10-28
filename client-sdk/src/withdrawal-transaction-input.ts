@@ -1,13 +1,13 @@
-import { StrKey } from '@stellar/stellar-sdk';
-import { generateRandomScalarHex32 } from './ephemeral-key';
-import { decodeStealthAddress } from './stealth-address';
+import { StrKey } from "@stellar/stellar-sdk";
+import { generateRandomScalarHex32 } from "./ephemeral-key";
+import { decodeStealthAddress } from "./stealth-address";
 import {
   canonicalBabyJubScalarFromInteger,
   reduceDerivedEscrowSpendScalar,
-} from './domain-separators';
-import type { TransactionAuditParams } from './transaction-audit';
-import { resolveSlotApplicationIds } from './transaction-audit';
-import type { WithdrawMerkleWitness } from './types';
+} from "./domain-separators";
+import type { TransactionAuditParams } from "./transaction-audit";
+import { resolveSlotApplicationIds } from "./transaction-audit";
+import type { WithdrawMerkleWitness } from "./types";
 
 /** Matches `Transaction(20, 2, 2, publicNInputs, publicNOutputs, 4, 12, 6)` in `circuits/main.circom`. */
 export const TRANSACTION_TREE_DEPTH = 20;
@@ -63,10 +63,16 @@ export function zeroPublicLegs(
   publicNOutputs: number = TRANSACTION_PUBLIC_N_OUTPUTS,
 ): TransactionPublicLegParams {
   return {
-    publicWithdrawnAssets: Array.from({ length: publicNOutputs }, () => ['0', '0'] as [string, string]),
-    publicDepositedAssets: Array.from({ length: publicNInputs }, () => ['0', '0'] as [string, string]),
-    publicDeposits: Array.from({ length: publicNInputs }, () => '0'),
-    publicWithdrawals: Array.from({ length: publicNOutputs }, () => '0'),
+    publicWithdrawnAssets: Array.from(
+      { length: publicNOutputs },
+      () => ["0", "0"] as [string, string],
+    ),
+    publicDepositedAssets: Array.from(
+      { length: publicNInputs },
+      () => ["0", "0"] as [string, string],
+    ),
+    publicDeposits: Array.from({ length: publicNInputs }, () => "0"),
+    publicWithdrawals: Array.from({ length: publicNOutputs }, () => "0"),
   };
 }
 
@@ -81,24 +87,54 @@ export function padPublicLegs(
     label: string,
   ): Array<[string, string]> => {
     if (values.length > expected) {
-      throw new Error(`withdrawal-transaction-input: expected at most ${expected} ${label}`);
+      throw new Error(
+        `withdrawal-transaction-input: expected at most ${expected} ${label}`,
+      );
     }
     return [
       ...values,
-      ...Array.from({ length: expected - values.length }, () => ['0', '0'] as [string, string]),
+      ...Array.from(
+        { length: expected - values.length },
+        () => ["0", "0"] as [string, string],
+      ),
     ];
   };
-  const padAmounts = (values: string[], expected: number, label: string): string[] => {
+  const padAmounts = (
+    values: string[],
+    expected: number,
+    label: string,
+  ): string[] => {
     if (values.length > expected) {
-      throw new Error(`withdrawal-transaction-input: expected at most ${expected} ${label}`);
+      throw new Error(
+        `withdrawal-transaction-input: expected at most ${expected} ${label}`,
+      );
     }
-    return [...values, ...Array.from({ length: expected - values.length }, () => '0')];
+    return [
+      ...values,
+      ...Array.from({ length: expected - values.length }, () => "0"),
+    ];
   };
   return {
-    publicWithdrawnAssets: padPairs(legs.publicWithdrawnAssets, publicNOutputs, 'public withdrawn assets'),
-    publicDepositedAssets: padPairs(legs.publicDepositedAssets, publicNInputs, 'public deposited assets'),
-    publicDeposits: padAmounts(legs.publicDeposits, publicNInputs, 'public deposits'),
-    publicWithdrawals: padAmounts(legs.publicWithdrawals, publicNOutputs, 'public withdrawals'),
+    publicWithdrawnAssets: padPairs(
+      legs.publicWithdrawnAssets,
+      publicNOutputs,
+      "public withdrawn assets",
+    ),
+    publicDepositedAssets: padPairs(
+      legs.publicDepositedAssets,
+      publicNInputs,
+      "public deposited assets",
+    ),
+    publicDeposits: padAmounts(
+      legs.publicDeposits,
+      publicNInputs,
+      "public deposits",
+    ),
+    publicWithdrawals: padAmounts(
+      legs.publicWithdrawals,
+      publicNOutputs,
+      "public withdrawals",
+    ),
   };
 }
 
@@ -120,6 +156,10 @@ export interface WithdrawObject {
   recipientStellar: [string, string];
   stateSiblings: string[];
   stateIndex: string;
+  /** Mode 001 field of the spent note. Omitted notes use `0`. */
+  accumulator?: string;
+  /** One mask bit per output slot. Omitted notes use zeros. */
+  inclusionMask?: string[];
 }
 
 export interface DepositObject {
@@ -132,12 +172,14 @@ export interface DepositObject {
   applicationId: string;
   /** Recipient public key `[x, y]` as decimal strings. */
   recipientPublicKeys: [string, string];
+  /** Seventh plaintext limb. Omitted notes use `0`. */
+  accumulator?: string;
   escrowNonce?: string;
   recipientStellar?: [string, string];
 }
 
-export type WithdrawSlot = WithdrawObject | 'dummy';
-export type DepositSlot = DepositObject | 'dummy';
+export type WithdrawSlot = WithdrawObject | "dummy";
+export type DepositSlot = DepositObject | "dummy";
 
 /** Witness calculator input for a `Transaction(20, nIns, nOuts, …)` instantiation. */
 export interface TransactionWitnessInput {
@@ -170,6 +212,11 @@ export interface TransactionWitnessInput {
   publicDepositedAssets: Array<[string, string]>;
   publicDeposits: string[];
   publicWithdrawals: string[];
+  publicWithdrawalAccumulators?: string[];
+  exitPayload?: string;
+  withdrawnAccumulators?: string[];
+  depositedAccumulators?: string[];
+  outputInclusionMasks?: string[][];
   inputApplicationIds: string[];
   outputApplicationIds: string[];
   auditEphemeralScalar: string;
@@ -177,13 +224,16 @@ export interface TransactionWitnessInput {
 }
 
 export interface WasmEcdhPointFns {
-  ecdhEphemeralPublicKeyFromScalarHex(scalarHex: string): { x: string; y: string };
+  ecdhEphemeralPublicKeyFromScalarHex(scalarHex: string): {
+    x: string;
+    y: string;
+  };
 }
 
 function normalizeHex(hex: string): string {
-  const s = hex.trim().replace(/^0x/i, '');
+  const s = hex.trim().replace(/^0x/i, "");
   if (!/^[0-9a-fA-F]*$/.test(s)) {
-    throw new Error('withdrawal-transaction-input: invalid hex');
+    throw new Error("withdrawal-transaction-input: invalid hex");
   }
   return s.length % 2 === 0 ? s : `0${s}`;
 }
@@ -192,7 +242,7 @@ function normalizeHex(hex: string): string {
 export function coordHexToDecimal(hex: string): string {
   const h = normalizeHex(hex);
   if (h.length > 64) {
-    throw new Error('withdrawal-transaction-input: coordinate hex too long');
+    throw new Error("withdrawal-transaction-input: coordinate hex too long");
   }
   const v = BigInt(`0x${h}`);
   return (v % BN254_SCALAR_MOD).toString(10);
@@ -205,12 +255,12 @@ export function coordHexToDecimal(hex: string): string {
 export function scalarHexToFrDecimal(hex: string): string {
   const h = normalizeHex(hex);
   if (h.length > 64) {
-    throw new Error('withdrawal-transaction-input: scalar hex too long');
+    throw new Error("withdrawal-transaction-input: scalar hex too long");
   }
-  const v = BigInt(`0x${h.padStart(64, '0').slice(-64)}`);
+  const v = BigInt(`0x${h.padStart(64, "0").slice(-64)}`);
   if (v >= BN254_BABYJUB_SCALAR_MAX_EXCLUSIVE) {
     throw new Error(
-      'depositor ephemeral scalar must be < 2^253 (BabyJub Num2Bits); resample with random-scalar',
+      "depositor ephemeral scalar must be < 2^253 (BabyJub Num2Bits); resample with random-scalar",
     );
   }
   return v.toString(10);
@@ -224,7 +274,7 @@ export function ed25519PubkeyPayloadHexToWithdrawFrDecimals(hex: string): {
   hi: string;
   lo: string;
 } {
-  const h = normalizeHex(hex).padStart(64, '0').slice(-64);
+  const h = normalizeHex(hex).padStart(64, "0").slice(-64);
   const hi = BigInt(`0x${h.slice(0, 32)}`);
   const lo = BigInt(`0x${h.slice(32, 64)}`);
   return { hi: hi.toString(10), lo: lo.toString(10) };
@@ -233,9 +283,11 @@ export function ed25519PubkeyPayloadHexToWithdrawFrDecimals(hex: string): {
 /**
  * Stellar contract id (`C…`) → two circom field decimals for `asset[0]`, `asset[1]` (same 32-byte split as accounts).
  */
-export function stellarContractAddressToAssetFrDecimals(address: string): [string, string] {
+export function stellarContractAddressToAssetFrDecimals(
+  address: string,
+): [string, string] {
   const raw = StrKey.decodeContract(address);
-  const hex = Buffer.from(raw).toString('hex');
+  const hex = Buffer.from(raw).toString("hex");
   const { hi, lo } = ed25519PubkeyPayloadHexToWithdrawFrDecimals(hex);
   return [hi, lo];
 }
@@ -256,34 +308,38 @@ export function randomFrDecimal253(): string {
 /** Spend-scalar hex in `(0, BabyJub subgroup order)` so dummy withdraws satisfy `LessThan(l)`. */
 function randomCanonicalBabyJubScalarHex(): string {
   const hex = generateRandomScalarHex32();
-  const reduced = canonicalBabyJubScalarFromInteger(BigInt(`0x${normalizeHex(hex)}`));
-  return reduced.toString(16).padStart(64, '0');
+  const reduced = canonicalBabyJubScalarFromInteger(
+    BigInt(`0x${normalizeHex(hex)}`),
+  );
+  return reduced.toString(16).padStart(64, "0");
 }
 
 function zerosTreeSiblings(): string[] {
-  return Array(TRANSACTION_TREE_DEPTH).fill('0');
+  return Array(TRANSACTION_TREE_DEPTH).fill("0");
 }
 
 function dummyWithdraw(wasm: WasmEcdhPointFns): WithdrawObject {
   const nullifier = randomFrDecimal();
   const secretHex = generateRandomScalarHex32();
-  const secret = (BigInt(`0x${normalizeHex(secretHex)}`) % BN254_SCALAR_MOD).toString(10);
+  const secret = (
+    BigInt(`0x${normalizeHex(secretHex)}`) % BN254_SCALAR_MOD
+  ).toString(10);
   const scalarHex = randomCanonicalBabyJubScalarHex();
   const privKeyScalar = scalarHexToFrDecimal(scalarHex);
   const pt = wasm.ecdhEphemeralPublicKeyFromScalarHex(scalarHex);
   return {
-    value: '0',
+    value: "0",
     nullifier,
     secret,
-    asset: ['0', '0'],
-    applicationId: '0',
+    asset: ["0", "0"],
+    applicationId: "0",
     ownerPub: [coordHexToDecimal(pt.x), coordHexToDecimal(pt.y)],
     privKeyScalar,
     paddingRandom: randomFrDecimal(),
-    escrowNonce: '0',
-    recipientStellar: ['0', '0'],
+    escrowNonce: "0",
+    recipientStellar: ["0", "0"],
     stateSiblings: zerosTreeSiblings(),
-    stateIndex: '0',
+    stateIndex: "0",
   };
 }
 
@@ -293,23 +349,29 @@ function dummyDeposit(wasm: WasmEcdhPointFns): DepositObject {
   const skHex = generateRandomScalarHex32();
   const pt = wasm.ecdhEphemeralPublicKeyFromScalarHex(skHex);
   return {
-    value: '0',
+    value: "0",
     nullifier,
     ephemeralKeyScalar,
-    asset: ['0', '0'],
-    applicationId: '0',
+    asset: ["0", "0"],
+    applicationId: "0",
     recipientPublicKeys: [coordHexToDecimal(pt.x), coordHexToDecimal(pt.y)],
-    escrowNonce: '0',
-    recipientStellar: ['0', '0'],
+    escrowNonce: "0",
+    recipientStellar: ["0", "0"],
   };
 }
 
-function resolveWithdraw(slot: WithdrawSlot, wasm: WasmEcdhPointFns): WithdrawObject {
-  return slot === 'dummy' ? dummyWithdraw(wasm) : slot;
+function resolveWithdraw(
+  slot: WithdrawSlot,
+  wasm: WasmEcdhPointFns,
+): WithdrawObject {
+  return slot === "dummy" ? dummyWithdraw(wasm) : slot;
 }
 
-function resolveDeposit(slot: DepositSlot, wasm: WasmEcdhPointFns): DepositObject {
-  return slot === 'dummy' ? dummyDeposit(wasm) : slot;
+function resolveDeposit(
+  slot: DepositSlot,
+  wasm: WasmEcdhPointFns,
+): DepositObject {
+  return slot === "dummy" ? dummyDeposit(wasm) : slot;
 }
 
 export function resolveDepositsForWitness(
@@ -322,18 +384,34 @@ export function resolveDepositsForWitness(
   ];
 }
 
-export function padWithdrawSlots(slots: WithdrawSlot[], nIns: number): WithdrawSlot[] {
+export function padWithdrawSlots(
+  slots: WithdrawSlot[],
+  nIns: number,
+): WithdrawSlot[] {
   if (slots.length > nIns) {
-    throw new Error(`withdrawal-transaction-input: expected at most ${nIns} withdraw slots`);
+    throw new Error(
+      `withdrawal-transaction-input: expected at most ${nIns} withdraw slots`,
+    );
   }
-  return [...slots, ...Array.from({ length: nIns - slots.length }, () => 'dummy' as const)];
+  return [
+    ...slots,
+    ...Array.from({ length: nIns - slots.length }, () => "dummy" as const),
+  ];
 }
 
-export function padDepositSlots(slots: DepositSlot[], nOuts: number): DepositSlot[] {
+export function padDepositSlots(
+  slots: DepositSlot[],
+  nOuts: number,
+): DepositSlot[] {
   if (slots.length > nOuts) {
-    throw new Error(`withdrawal-transaction-input: expected at most ${nOuts} deposit slots`);
+    throw new Error(
+      `withdrawal-transaction-input: expected at most ${nOuts} deposit slots`,
+    );
   }
-  return [...slots, ...Array.from({ length: nOuts - slots.length }, () => 'dummy' as const)];
+  return [
+    ...slots,
+    ...Array.from({ length: nOuts - slots.length }, () => "dummy" as const),
+  ];
 }
 
 export function buildTransactionWitnessInput(
@@ -343,7 +421,12 @@ export function buildTransactionWitnessInput(
   depositSlots: DepositSlot[],
   audit: TransactionAuditParams,
   wasm: WasmEcdhPointFns,
-  dims: { nIns?: number; nOuts?: number; publicNInputs?: number; publicNOutputs?: number } = {},
+  dims: {
+    nIns?: number;
+    nOuts?: number;
+    publicNInputs?: number;
+    publicNOutputs?: number;
+  } = {},
 ): TransactionWitnessInput {
   const nIns = dims.nIns ?? TRANSACTION_N_INS;
   const nOuts = dims.nOuts ?? TRANSACTION_N_OUTS;
@@ -354,16 +437,20 @@ export function buildTransactionWitnessInput(
   const paddedLegs = padPublicLegs(publicLegs, publicNInputs, publicNOutputs);
   const withdraws = paddedWithdraws.map((slot) => resolveWithdraw(slot, wasm));
   const deposits = paddedDeposits.map((slot) => resolveDeposit(slot, wasm));
-  const appIds = resolveSlotApplicationIds(audit, paddedWithdraws, paddedDeposits);
+  const appIds = resolveSlotApplicationIds(
+    audit,
+    paddedWithdraws,
+    paddedDeposits,
+  );
 
   return {
     stateRoot: publicParams.stateRoot,
     withdrawAddressHi: publicParams.withdrawAddressHi,
     withdrawAddressLo: publicParams.withdrawAddressLo,
-    escrowRecipientHi: publicParams.escrowRecipientHi ?? '0',
-    escrowRecipientLo: publicParams.escrowRecipientLo ?? '0',
-    sweepOutputOwnerPubX: publicParams.sweepOutputOwnerPubX ?? '0',
-    sweepOutputOwnerPubY: publicParams.sweepOutputOwnerPubY ?? '0',
+    escrowRecipientHi: publicParams.escrowRecipientHi ?? "0",
+    escrowRecipientLo: publicParams.escrowRecipientLo ?? "0",
+    sweepOutputOwnerPubX: publicParams.sweepOutputOwnerPubX ?? "0",
+    sweepOutputOwnerPubY: publicParams.sweepOutputOwnerPubY ?? "0",
     privKeyScalars: withdraws.map((w) => w.privKeyScalar),
     ownerPubs: withdraws.map((w) => w.ownerPub),
     paddingRandoms: withdraws.map((w) => w.paddingRandom),
@@ -380,8 +467,10 @@ export function buildTransactionWitnessInput(
     depositedAssets: deposits.map((d) => d.asset),
     depositedEphemeralKeyScalars: deposits.map((d) => d.ephemeralKeyScalar),
     depositedRecipientPublicKeys: deposits.map((d) => d.recipientPublicKeys),
-    depositedEscrowNonces: deposits.map((d) => d.escrowNonce ?? '0'),
-    outputRecipientStellar: deposits.map((d) => d.recipientStellar ?? ['0', '0']),
+    depositedEscrowNonces: deposits.map((d) => d.escrowNonce ?? "0"),
+    outputRecipientStellar: deposits.map(
+      (d) => d.recipientStellar ?? ["0", "0"],
+    ),
     inputApplicationIds: appIds.inputApplicationIds,
     outputApplicationIds: appIds.outputApplicationIds,
     auditEphemeralScalar: audit.auditEphemeralScalar,
@@ -410,8 +499,8 @@ export function withdrawObjectFromMerkleWitness(
 ): WithdrawObject {
   return buildWithdrawObject(witness, ownerPubHex, applicationId, {
     privKeyScalar,
-    escrowNonce: '0',
-    recipientStellar: ['0', '0'],
+    escrowNonce: "0",
+    recipientStellar: ["0", "0"],
   });
 }
 
@@ -451,7 +540,10 @@ function buildWithdrawObject(
     secret: witness.secret,
     asset: witness.withdrawnAsset,
     applicationId,
-    ownerPub: [coordHexToDecimal(ownerPubHex.x), coordHexToDecimal(ownerPubHex.y)],
+    ownerPub: [
+      coordHexToDecimal(ownerPubHex.x),
+      coordHexToDecimal(ownerPubHex.y),
+    ],
     privKeyScalar: spend.privKeyScalar,
     paddingRandom: randomFrDecimal(),
     escrowNonce: spend.escrowNonce,

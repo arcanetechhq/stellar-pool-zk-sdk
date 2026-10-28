@@ -76,5 +76,30 @@ assert.equal(
   layout.nAuditSlots * layout.noteAuditLen +
     layout.nOuts * layout.noteOutputLen,
 );
+
+console.log("BEGIN second proveTransaction 6x6 on the same artifacts");
+const warnings = [];
+const warn = console.warn;
+console.warn = (...args) => {
+  warnings.push(args.map(String).join(" "));
+  warn(...args);
+};
+try {
+  const second = await sdk.proveTransaction(
+    publicParams,
+    publicLegs,
+    [],
+    [{ ...deposit, nullifier: randomFrDecimal() }],
+    audit,
+  );
+  assert.equal(second.proof_hex.length, 512);
+} finally {
+  console.warn = warn;
+}
+assert.deepEqual(
+  warnings.filter((line) => line.includes("Groth16")),
+  [],
+);
+console.log("END second proveTransaction 6x6");
 console.log("END six-by-six-witness-proof");
 console.log("six-by-six-witness-proof: ok");

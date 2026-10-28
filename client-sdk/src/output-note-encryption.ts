@@ -1,13 +1,17 @@
-import { buildBabyjub, buildMimc7, buildPoseidon } from 'circomlibjs';
+import { buildBabyjub, buildMimc7, buildPoseidon } from "circomlibjs";
 import type {
   DepositObject,
   TransactionWitnessInput,
-} from './withdrawal-transaction-input.js';
-import type { EcdhSharedKeyFn } from './shared-secret.js';
-import { DOM_ENC, DOM_AUDIT_TAG, DOM_OUTPUT_NOTE_TAG } from './domain-separators.js';
-import { encodeTransactionCiphertextBlob } from './ciphertext-blob.js';
-import type { ZkLayoutParams } from './zk-layout.js';
-import { loadWasm } from './wasm.js';
+} from "./withdrawal-transaction-input.js";
+import type { EcdhSharedKeyFn } from "./shared-secret.js";
+import {
+  DOM_ENC,
+  DOM_AUDIT_TAG,
+  DOM_OUTPUT_NOTE_TAG,
+} from "./domain-separators.js";
+import { encodeTransactionCiphertextBlob } from "./ciphertext-blob.js";
+import type { ZkLayoutParams } from "./zk-layout.js";
+import { loadWasm } from "./wasm.js";
 
 export const NOTE_OUTPUT_LEN = 6;
 export const NOTE_AUDIT_LEN = 12;
@@ -76,7 +80,10 @@ function primitives(): Promise<CryptoPrimitives> {
 }
 
 function normalizeHex(value: string): string {
-  return value.trim().replace(/^0x/i, '').padStart(FR_SIZE * 2, '0');
+  return value
+    .trim()
+    .replace(/^0x/i, "")
+    .padStart(FR_SIZE * 2, "0");
 }
 
 function bigintFromHex(value: string): bigint {
@@ -95,7 +102,7 @@ function bigintToFrHex(value: bigint): string {
     buf[index] = Number(v & 0xffn);
     v >>= 8n;
   }
-  return buf.toString('hex');
+  return buf.toString("hex");
 }
 
 function frDecimalToHex(value: string): string {
@@ -103,7 +110,8 @@ function frDecimalToHex(value: string): string {
 }
 
 function frDecimalFromBigint(value: bigint): string {
-  const reduced = value >= ZERO ? value % FR_MODULUS : (value % FR_MODULUS) + FR_MODULUS;
+  const reduced =
+    value >= ZERO ? value % FR_MODULUS : (value % FR_MODULUS) + FR_MODULUS;
   return reduced.toString(10);
 }
 
@@ -167,7 +175,7 @@ function sharedKeyFromRecipient(parameters: {
     babyJub.F.e(bigintFromHex(ephemeralPublicKey[1])),
   ];
   if (!babyJub.inCurve(point)) {
-    throw new Error('Created ephemeral public key is not on BabyJubJub curve');
+    throw new Error("Created ephemeral public key is not on BabyJubJub curve");
   }
   const product = babyJub.mulPointEscalar(
     point,
@@ -323,6 +331,18 @@ function decryptAuditSlotFields(parameters: {
   });
 }
 
+function plaintextLimbsForNote(parameters: {
+  plaintext: OutputNotePlaintext;
+  accumulator: string;
+  noteOutputLen: number;
+}): bigint[] {
+  const limbs = plaintextBigints(parameters.plaintext);
+  if (parameters.noteOutputLen > limbs.length) {
+    limbs.push(bigintFromDecimal(parameters.accumulator));
+  }
+  return limbs;
+}
+
 function plaintextBigints(plaintext: OutputNotePlaintext): bigint[] {
   return [
     bigintFromDecimal(plaintext.value),
@@ -349,13 +369,16 @@ export async function secretFromDepositEphemeralScalarDecimal(
   ephemeralKeyScalarDecimal: string,
 ): Promise<string> {
   const { poseidon } = await primitives();
-  const secret = poseidonHash(poseidon, [bigintFromDecimal(ephemeralKeyScalarDecimal)]);
+  const secret = poseidonHash(poseidon, [
+    bigintFromDecimal(ephemeralKeyScalarDecimal),
+  ]);
   return frDecimalFromBigint(secret);
 }
 
 export async function encryptOutputNoteForDeposit(parameters: {
   deposit: DepositObject;
   ecdhShared: EcdhSharedKeyFn;
+  noteOutputLen?: number;
 }): Promise<OutputNoteEncryption> {
   const { babyJub, mimc7, poseidon } = await primitives();
   const secret = await secretFromDepositEphemeralScalarDecimal(
@@ -377,11 +400,23 @@ export async function encryptOutputNoteForDeposit(parameters: {
   });
   const key = deriveEncCipherKey(poseidon, sharedX);
   const nonce = sharedY;
-  const message = plaintextBigints(plaintext);
-  const ciphertext = encryptFields({ mimc7, poseidon, key, nonce, plaintext: message });
+  const message = plaintextLimbsForNote({
+    plaintext,
+    accumulator: parameters.deposit.accumulator ?? "0",
+    noteOutputLen: parameters.noteOutputLen ?? NOTE_OUTPUT_LEN,
+  });
+  const ciphertext = encryptFields({
+    mimc7,
+    poseidon,
+    key,
+    nonce,
+    plaintext: message,
+  });
   const tag = outputNoteTag({ poseidon, key, nonce, plaintext: message });
   return {
-    ciphertext: ciphertext.map((field) => frDecimalFromBigint(field)) as OutputNoteEncryption['ciphertext'],
+    ciphertext: ciphertext.map((field) =>
+      frDecimalFromBigint(field),
+    ) as OutputNoteEncryption["ciphertext"],
     tag: frDecimalFromBigint(tag),
   };
 }
@@ -390,7 +425,10 @@ export async function buildOutputNoteEncryptionPublicInputs(parameters: {
   deposits: [DepositObject, DepositObject];
   ecdhShared: EcdhSharedKeyFn;
 }): Promise<{
-  outputNoteCiphertexts: [OutputNoteEncryption['ciphertext'], OutputNoteEncryption['ciphertext']];
+  outputNoteCiphertexts: [
+    OutputNoteEncryption["ciphertext"],
+    OutputNoteEncryption["ciphertext"],
+  ];
   outputNoteTags: [string, string];
 }> {
   const enc0 = await encryptOutputNoteForDeposit({
@@ -490,11 +528,8 @@ export async function decryptOutputNoteEvent(
     nonce,
     plaintext: decrypted,
   });
-  if (
-    input.tag !== undefined &&
-    expectedTag !== bigintFromHex(input.tag)
-  ) {
-    throw new Error('Output note tag verification failed');
+  if (input.tag !== undefined && expectedTag !== bigintFromHex(input.tag)) {
+    throw new Error("Output note tag verification failed");
   }
   const plaintext = plaintextFromBigints(decrypted);
   const commitmentHex = await commitmentHexFromPlaintextAndOwnerPub({
@@ -506,7 +541,7 @@ export async function decryptOutputNoteEvent(
     input.commitmentHashHex === undefined ||
     normalizeHex(input.commitmentHashHex) === commitmentHex;
   if (!commitmentMatches) {
-    throw new Error('Output note commitment checksum mismatch');
+    throw new Error("Output note commitment checksum mismatch");
   }
   return {
     ...plaintext,
@@ -572,7 +607,9 @@ export async function encryptNoteAuditSlot(parameters: {
     );
   }
   if (!Number.isInteger(parameters.slotIndex) || parameters.slotIndex < 0) {
-    throw new Error('encryptNoteAuditSlot: slotIndex must be a non-negative integer');
+    throw new Error(
+      "encryptNoteAuditSlot: slotIndex must be a non-negative integer",
+    );
   }
   const { babyJub, mimc7, poseidon } = await primitives();
   const { key, nonce } = deriveSharedAuditKey({
@@ -618,7 +655,9 @@ export async function decryptNoteAuditSlot(parameters: {
     );
   }
   if (!Number.isInteger(parameters.slotIndex) || parameters.slotIndex < 0) {
-    throw new Error('decryptNoteAuditSlot: slotIndex must be a non-negative integer');
+    throw new Error(
+      "decryptNoteAuditSlot: slotIndex must be a non-negative integer",
+    );
   }
   const { babyJub, mimc7, poseidon } = await primitives();
   const { key, nonce } = deriveSharedAuditKey({
@@ -644,7 +683,7 @@ export async function decryptNoteAuditSlot(parameters: {
     message: decrypted,
   });
   if (expectedTag !== bigintFromHex(parameters.tag)) {
-    throw new Error('Audit slot tag verification failed');
+    throw new Error("Audit slot tag verification failed");
   }
   return {
     plaintext: decrypted.map((field) => frDecimalFromBigint(field)),
@@ -656,11 +695,12 @@ function auditPlaintextForWithdraw(parameters: {
   witness: TransactionWitnessInput;
   index: number;
 }): string[] {
-  const value = parameters.witness.withdrawnValues[parameters.index] ?? '0';
-  const ownerPub = parameters.witness.ownerPubs[parameters.index] ?? ['0', '0'];
-  const escrowNonce = parameters.witness.withdrawnEscrowNonces[parameters.index] ?? '0';
+  const value = parameters.witness.withdrawnValues[parameters.index] ?? "0";
+  const ownerPub = parameters.witness.ownerPubs[parameters.index] ?? ["0", "0"];
+  const escrowNonce =
+    parameters.witness.withdrawnEscrowNonces[parameters.index] ?? "0";
   const secret = bigintFromDecimal(
-    parameters.witness.withdrawnSecrets[parameters.index] ?? '0',
+    parameters.witness.withdrawnSecrets[parameters.index] ?? "0",
   );
   const ownerMode = ownerModeFromEscrowNonce(escrowNonce);
   const precommitment = precommitmentFromOpening({
@@ -669,18 +709,23 @@ function auditPlaintextForWithdraw(parameters: {
     ownerMode,
     ownerPub: [bigintFromDecimal(ownerPub[0]), bigintFromDecimal(ownerPub[1])],
   });
-  const asset = parameters.witness.withdrawnAssets[parameters.index] ?? ['0', '0'];
-  const stellar = parameters.witness.inputRecipientStellar[parameters.index] ?? ['0', '0'];
+  const asset = parameters.witness.withdrawnAssets[parameters.index] ?? [
+    "0",
+    "0",
+  ];
+  const stellar = parameters.witness.inputRecipientStellar[
+    parameters.index
+  ] ?? ["0", "0"];
   return [
     frDecimalFromBigint(emptyFlagFromValue(value)),
     value,
     asset[0],
     asset[1],
     frDecimalFromBigint(precommitment),
-    parameters.witness.withdrawnNullifiers[parameters.index] ?? '0',
+    parameters.witness.withdrawnNullifiers[parameters.index] ?? "0",
     ownerPub[0],
     ownerPub[1],
-    parameters.witness.inputApplicationIds[parameters.index] ?? '0',
+    parameters.witness.inputApplicationIds[parameters.index] ?? "0",
     stellar[0],
     stellar[1],
     escrowNonce,
@@ -692,13 +737,15 @@ async function auditPlaintextForDeposit(parameters: {
   witness: TransactionWitnessInput;
   index: number;
 }): Promise<string[]> {
-  const value = parameters.witness.depositedValues[parameters.index] ?? '0';
-  const ownerPub =
-    parameters.witness.depositedRecipientPublicKeys[parameters.index] ?? ['0', '0'];
-  const escrowNonce = parameters.witness.depositedEscrowNonces[parameters.index] ?? '0';
+  const value = parameters.witness.depositedValues[parameters.index] ?? "0";
+  const ownerPub = parameters.witness.depositedRecipientPublicKeys[
+    parameters.index
+  ] ?? ["0", "0"];
+  const escrowNonce =
+    parameters.witness.depositedEscrowNonces[parameters.index] ?? "0";
   const secret = poseidonHash(parameters.poseidon, [
     bigintFromDecimal(
-      parameters.witness.depositedEphemeralKeyScalars[parameters.index] ?? '0',
+      parameters.witness.depositedEphemeralKeyScalars[parameters.index] ?? "0",
     ),
   ]);
   const ownerMode = ownerModeFromEscrowNonce(escrowNonce);
@@ -708,18 +755,23 @@ async function auditPlaintextForDeposit(parameters: {
     ownerMode,
     ownerPub: [bigintFromDecimal(ownerPub[0]), bigintFromDecimal(ownerPub[1])],
   });
-  const asset = parameters.witness.depositedAssets[parameters.index] ?? ['0', '0'];
-  const stellar = parameters.witness.outputRecipientStellar[parameters.index] ?? ['0', '0'];
+  const asset = parameters.witness.depositedAssets[parameters.index] ?? [
+    "0",
+    "0",
+  ];
+  const stellar = parameters.witness.outputRecipientStellar[
+    parameters.index
+  ] ?? ["0", "0"];
   return [
     frDecimalFromBigint(emptyFlagFromValue(value)),
     value,
     asset[0],
     asset[1],
     frDecimalFromBigint(precommitment),
-    parameters.witness.depositedNullifiers[parameters.index] ?? '0',
+    parameters.witness.depositedNullifiers[parameters.index] ?? "0",
     ownerPub[0],
     ownerPub[1],
-    parameters.witness.outputApplicationIds[parameters.index] ?? '0',
+    parameters.witness.outputApplicationIds[parameters.index] ?? "0",
     stellar[0],
     stellar[1],
     escrowNonce,
@@ -765,17 +817,23 @@ export async function encryptTransactionCiphertextBlob(parameters: {
   const outputNoteCiphertexts: string[][] = [];
   for (let index = 0; index < nOuts; index += 1) {
     const deposit: DepositObject = {
-      value: parameters.witness.depositedValues[index] ?? '0',
-      nullifier: parameters.witness.depositedNullifiers[index] ?? '0',
-      ephemeralKeyScalar: parameters.witness.depositedEphemeralKeyScalars[index] ?? '0',
-      asset: parameters.witness.depositedAssets[index] ?? ['0', '0'],
-      applicationId: parameters.witness.outputApplicationIds[index] ?? '0',
-      recipientPublicKeys:
-        parameters.witness.depositedRecipientPublicKeys[index] ?? ['0', '0'],
+      value: parameters.witness.depositedValues[index] ?? "0",
+      nullifier: parameters.witness.depositedNullifiers[index] ?? "0",
+      ephemeralKeyScalar:
+        parameters.witness.depositedEphemeralKeyScalars[index] ?? "0",
+      asset: parameters.witness.depositedAssets[index] ?? ["0", "0"],
+      applicationId: parameters.witness.outputApplicationIds[index] ?? "0",
+      recipientPublicKeys: parameters.witness.depositedRecipientPublicKeys[
+        index
+      ] ?? ["0", "0"],
     };
     const encrypted = await encryptOutputNoteForDeposit({
-      deposit,
+      deposit: {
+        ...deposit,
+        accumulator: parameters.witness.depositedAccumulators?.[index] ?? "0",
+      },
       ecdhShared: parameters.ecdhShared,
+      noteOutputLen: parameters.layout.noteOutputLen,
     });
     outputNoteCiphertexts.push([...encrypted.ciphertext]);
   }
@@ -785,7 +843,7 @@ export async function encryptTransactionCiphertextBlob(parameters: {
     outputNoteCiphertexts,
   });
   return {
-    ciphertextHex: blob.toString('hex'),
+    ciphertextHex: blob.toString("hex"),
     auditCiphertexts,
     outputNoteCiphertexts,
   };

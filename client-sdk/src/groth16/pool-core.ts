@@ -234,6 +234,9 @@ function assignFresh(
   }
 }
 
+/** Node `Buffer#slice` shares memory, so transferring its buffer would detach the caller's bytes. */
 function copyBytes(bytes: Uint8Array): ArrayBuffer {
-  return bytes.slice().buffer;
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
 }

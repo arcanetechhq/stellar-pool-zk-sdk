@@ -120,11 +120,33 @@ pub fn commitment_chain(
     asset: [Fr; 2],
     application_id: Fr,
 ) -> Fr {
+    commitment_chain_with_accumulator(
+        value,
+        secret,
+        nullifier,
+        owner_pub,
+        owner_mode,
+        asset,
+        application_id,
+        Fr::from(0u64),
+    )
+}
+
+pub fn commitment_chain_with_accumulator(
+    value: Fr,
+    secret: Fr,
+    nullifier: Fr,
+    owner_pub: OwnerPub,
+    owner_mode: Fr,
+    asset: [Fr; 2],
+    application_id: Fr,
+    accumulator: Fr,
+) -> Fr {
     let link0 = poseidon_hash_3(Fr::from(DOM_COMMITMENT_V4), value, secret);
     let link1 = poseidon_hash_3(link0, nullifier, owner_pub.x);
     let link2 = poseidon_hash_3(link1, owner_pub.y, owner_mode);
     let link3 = poseidon_hash_3(link2, asset[0], asset[1]);
-    poseidon_hash_3(link3, application_id, Fr::from(0u64))
+    poseidon_hash_3(link3, application_id, accumulator)
 }
 
 pub fn commitment_and_precommitment(
@@ -461,6 +483,38 @@ pub fn commitment_chain_hex(
             decimal_to_fr_result(asset_lo)?,
         ],
         decimal_to_fr_result(application_id)?,
+    );
+    Ok(format!("0x{}", hex::encode(fr_to_bytes_be(&commitment))))
+}
+
+pub fn commitment_chain_hex_with_accumulator(
+    value: &str,
+    secret: &str,
+    nullifier: &str,
+    owner_x: &str,
+    owner_y: &str,
+    owner_mode: &str,
+    asset_hi: &str,
+    asset_lo: &str,
+    application_id: &str,
+    accumulator: &str,
+) -> Result<String, String> {
+    let owner_pub = OwnerPub::from_field_elements(
+        decimal_to_fr_result(owner_x)?,
+        decimal_to_fr_result(owner_y)?,
+    );
+    let commitment = commitment_chain_with_accumulator(
+        decimal_to_fr_result(value)?,
+        decimal_to_fr_result(secret)?,
+        decimal_to_fr_result(nullifier)?,
+        owner_pub,
+        decimal_to_fr_result(owner_mode)?,
+        [
+            decimal_to_fr_result(asset_hi)?,
+            decimal_to_fr_result(asset_lo)?,
+        ],
+        decimal_to_fr_result(application_id)?,
+        decimal_to_fr_result(accumulator)?,
     );
     Ok(format!("0x{}", hex::encode(fr_to_bytes_be(&commitment))))
 }
