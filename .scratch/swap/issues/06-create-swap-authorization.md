@@ -4,10 +4,14 @@
 
 **Blocked by:** 01 — Exact swap witness is accepted
 
-**Status:** claimed
+**Status:** resolved
 
 - [x] The authorization is created from the seller's notes, the sender's owner key, the quote, the swap amount, and the expiration ledger, without a proving key
 - [x] The result includes the signature, `minimumSenderBalance` equal to the swap amount, `bPaid`, and the note opening of the proceeds note
 - [x] A change of zero returns one note opening, and a non-zero change returns the proceeds opening and the change opening
 - [x] The signature verifies in an exact swap
 - [x] A scalar that does not open the notes, mixed assets, mixed application ids, an empty note set, and a set of six notes are rejected
+
+## Answer
+
+`createSwapAuthorization` returns the signature, `minimumSenderBalance`, `bPaid`, and the seller's note openings without a proving key. Each authorization samples a fresh signature nonce that is not part of the signed message. Recorded on `feat/swap` at `83481de` (pool submodule `90bc8f1`).

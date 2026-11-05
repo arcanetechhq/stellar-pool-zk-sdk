@@ -4,9 +4,13 @@
 
 **Blocked by:** 01 — Exact swap witness is accepted
 
-**Status:** claimed
+**Status:** resolved
 
 - [x] An escrow note as an input or as an output fails the witness check
 - [x] A note with a non-zero accumulator fails the witness check
 - [x] A non-zero note whose application id differs from the others fails the witness check
 - [x] An accepted swap's padding notes have application id zero, value zero, asset zero, and a throwaway owner key
+
+## Answer
+
+Escrow notes, a non-zero accumulator, and a mismatched application id fail the witness check. Padding notes in an accepted swap have application id zero and a throwaway owner. Recorded on `feat/swap` at `83481de` (pool submodule `90bc8f1`).
