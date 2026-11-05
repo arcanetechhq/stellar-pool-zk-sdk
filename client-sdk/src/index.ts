@@ -1,4 +1,9 @@
 export { PrivacyPoolSDK } from "./sdk";
+export type {
+  ProveSwapParams,
+  SwapAuthorizationResult,
+  SwapNoteOpening,
+} from "./swap-proof";
 export { generateWitness } from "./witness";
 export type {
   CoinData,
@@ -121,6 +126,9 @@ export {
   SIX_BY_SIX_BINDING_ZK_NONCE,
   SIX_BY_SIX_ZK_NONCE,
   TEN_BY_ONE_ZK_NONCE,
+  SWAP_ZK_NONCE,
+  isSwapLayout,
+  swapLayout,
   bundledCircuitFileNames,
   bundledCircuitStem,
   circuitProfileFromName,

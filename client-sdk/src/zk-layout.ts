@@ -6,6 +6,8 @@ export const BINDING_ZK_NONCE = 3n;
 export const SIX_BY_SIX_ZK_NONCE = 6n;
 export const SIX_BY_SIX_BINDING_ZK_NONCE = 7n;
 export const TEN_BY_ONE_ZK_NONCE = 10n;
+export const SWAP_ZK_NONCE = 8n;
+export const SWAP_PUBLIC_INPUT_PREFIX_LEN = 2;
 
 export const LEGACY_PUBLIC_INPUT_PREFIX_LEN = 5;
 export const V2_PUBLIC_INPUT_PREFIX_LEN = 7;
@@ -79,14 +81,62 @@ export const DEFAULT_ZK_CIRCUITS: Record<string, BundledZkCircuitConfig> = {
 export function layoutFromCircuitConfig(
   config: ZkCircuitConfig,
 ): ZkLayoutParams {
-  return zkLayoutFromShapeBinding(
-    config.nIns,
-    config.nOuts,
-    config.publicNInputs,
-    config.publicNOutputs,
-    config.nIns + config.nOuts,
-    NOTE_AUDIT_LEN,
-    BINDING_NOTE_OUTPUT_LEN,
+  return recognizeSwapPrefix(
+    zkLayoutFromShapeBinding(
+      config.nIns,
+      config.nOuts,
+      config.publicNInputs,
+      config.publicNOutputs,
+      config.nIns + config.nOuts,
+      NOTE_AUDIT_LEN,
+      BINDING_NOTE_OUTPUT_LEN,
+    ),
+  );
+}
+
+/** A 6×6 binding shape with no public legs is the swap statement. Its prefix is the tree root and the expiration ledger. */
+export function recognizeSwapPrefix(layout: ZkLayoutParams): ZkLayoutParams {
+  if (!matchesSwapShape(layout)) {
+    return layout;
+  }
+  return {
+    ...layout,
+    publicInputPrefixLen: SWAP_PUBLIC_INPUT_PREFIX_LEN,
+  };
+}
+
+function matchesSwapShape(layout: ZkLayoutParams): boolean {
+  return (
+    layout.nIns === 6 &&
+    layout.nOuts === 6 &&
+    layout.publicNInputs === 0 &&
+    layout.publicNOutputs === 0 &&
+    layout.nAuditSlots === 12 &&
+    layout.noteAuditLen === NOTE_AUDIT_LEN &&
+    layout.noteOutputLen === BINDING_NOTE_OUTPUT_LEN &&
+    layout.auditOffset === 24 &&
+    layout.outputNoteOffset === 38
+  );
+}
+
+export function isSwapLayout(layout: ZkLayoutParams): boolean {
+  return (
+    matchesSwapShape(layout) &&
+    layout.publicInputPrefixLen === SWAP_PUBLIC_INPUT_PREFIX_LEN
+  );
+}
+
+export function swapLayout(): ZkLayoutParams {
+  return recognizeSwapPrefix(
+    zkLayoutFromShapeBinding(
+      6,
+      6,
+      0,
+      0,
+      12,
+      NOTE_AUDIT_LEN,
+      BINDING_NOTE_OUTPUT_LEN,
+    ),
   );
 }
 
@@ -367,6 +417,9 @@ export function layoutForKnownNonce(nonce: bigint): ZkLayoutParams {
   }
   if (nonce === TEN_BY_ONE_ZK_NONCE) {
     return tenByOneBindingLayout();
+  }
+  if (nonce === SWAP_ZK_NONCE) {
+    return swapLayout();
   }
   throw new Error(`unknown zk config nonce ${nonce.toString()}`);
 }

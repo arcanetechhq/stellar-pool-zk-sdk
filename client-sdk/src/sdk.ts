@@ -42,6 +42,7 @@ import { stealthAddressFromStellarSignature } from "./stealth-signature";
 import type { DecodedRecipientSharedSecretPreimage } from "./stealth-address";
 import {
   buildTransactionWitnessInput,
+  coordHexToDecimal,
   randomFrDecimal,
   randomFrDecimal253,
   recipientPublicKeysDecimalFromStealthAddress,
@@ -50,6 +51,7 @@ import {
   type DepositSlot,
   type TransactionPublicLegParams,
   type WasmEcdhPointFns,
+  type TransactionWitnessInput,
   type WithdrawalProofPublicParams,
   type WithdrawSlot,
 } from "./withdrawal-transaction-input";
@@ -60,12 +62,18 @@ import {
   type TransactionAuditParams,
 } from "./transaction-audit";
 import {
+  isSwapLayout,
   layoutFromCircuitConfig,
   resolveZkCircuitConfig,
   type ZkCircuitConfig,
   type ZkLayoutParams,
 } from "./zk-layout";
 import { encryptTransactionCiphertextBlob } from "./output-note-encryption";
+import {
+  buildExactSwapWitnessInput,
+  EXACT_SWAP_PADDING_SCALAR,
+  type ProveSwapParams,
+} from "./swap-proof";
 
 /** Stroops amount as a decimal field string. Reject JS `number` so 18-decimal values cannot silently narrow. */
 function coinValueDecimal(amount: unknown): string {
@@ -461,6 +469,108 @@ export class PrivacyPoolSDK {
           this.layout.nAuditSlots,
         ),
     );
+  }
+
+  /**
+   * Exact swap proof. The SDK must have been initialized for the swap circuit.
+   * The seller's proceeds note is the opening from the authorization.
+   */
+  async proveSwap(params: ProveSwapParams): Promise<WithdrawResult> {
+    if (!isSwapLayout(this.layout)) {
+      throw new Error(
+        "proveSwap requires an SDK initialized for the swap circuit",
+      );
+    }
+    const senderWitness = this.buildWithdrawMerkleWitness(
+      params.senderNotes[0],
+      params.state,
+    );
+    const sellerWitness = this.buildWithdrawMerkleWitness(
+      params.sellerNotes[0],
+      params.state,
+    );
+    if (senderWitness.stateRoot !== sellerWitness.stateRoot) {
+      throw new Error("sender and seller notes are not in the same pool state");
+    }
+    const senderOwner = this.ownerPointFromSpendScalar(params.senderSpendScalar);
+    const paddingOwner = this.ownerPointFromSpendScalar(EXACT_SWAP_PADDING_SCALAR);
+    if (
+      (paddingOwner[0] === senderOwner[0] && paddingOwner[1] === senderOwner[1]) ||
+      (paddingOwner[0] === params.authorization.noteOpenings?.[0]?.owner_x &&
+        paddingOwner[1] === params.authorization.noteOpenings?.[0]?.owner_y)
+    ) {
+      throw new Error("padding note collided with a swap party");
+    }
+    const witnessInput = buildExactSwapWitnessInput({
+      authorization: params.authorization,
+      sellerNotes: params.sellerNotes,
+      senderNotes: params.senderNotes,
+      senderSpendScalar: params.senderSpendScalar,
+      audit: params.audit,
+      senderWitness,
+      sellerWitness,
+      senderOwner,
+      paddingOwner,
+    });
+    if (params.witnessInputPath) {
+      const fs = await import("fs");
+      fs.writeFileSync(params.witnessInputPath, JSON.stringify(witnessInput));
+    }
+    return this.proveWitnessInput(witnessInput);
+  }
+
+  private ownerPointFromSpendScalar(decimal: string): [string, string] {
+    const hex = BigInt(decimal).toString(16).padStart(64, "0");
+    const point = this.ecdhEphemeralPublicKeyFromScalarHex(hex);
+    return [coordHexToDecimal(point.x), coordHexToDecimal(point.y)];
+  }
+
+  private async proveWitnessInput(
+    witnessInput: { depositedEphemeralKeyScalars: string[] },
+  ): Promise<WithdrawResult> {
+    const artifacts = this.circuitArtifacts;
+    if (!artifacts) {
+      throw new Error("PrivacyPoolSDK circuit artifacts are not loaded");
+    }
+    const groth16Pool =
+      this.groth16Pool ?? createGroth16Pool(this.options.wasmBinary);
+    this.groth16Pool = groth16Pool;
+    const pendingBases = this.basesExport;
+    if (!this.msmBases && pendingBases) {
+      this.msmBases = await measureStage("exportBases", () => pendingBases);
+    }
+    const inputsJson = JSON.stringify(witnessInput);
+    const proved = await measureStage("groth16", async () => {
+      const result = await proveGroth16Parallel({
+        wasm: this.wasm,
+        pool: groth16Pool,
+        host: this.proverHost,
+        graph: artifacts.graph,
+        provingKey: artifacts.provingKey,
+        r1cs: artifacts.r1cs,
+        inputsJson,
+        cachedBases: this.msmBases,
+      });
+      this.msmBases = result.bases;
+      return {
+        proof_hex: result.proof_hex,
+        public_hex: result.public_hex,
+      };
+    });
+    const encrypted = await measureStage("encrypt", () =>
+      encryptTransactionCiphertextBlob({
+        witness: witnessInput as TransactionWitnessInput,
+        layout: this.layout,
+        ecdhShared: (priv, pubX, pubY) =>
+          this.wasm.ecdhSharedKey(priv, pubX, pubY),
+      }),
+    );
+    return {
+      proof_hex: proved.proof_hex,
+      public_hex: proved.public_hex,
+      ciphertext_hex: encrypted.ciphertextHex,
+      output_note_ephemeral_scalars: witnessInput.depositedEphemeralKeyScalars,
+    };
   }
 
   /**
