@@ -1,3 +1,4 @@
+pub mod circom_poseidon;
 pub mod coin;
 pub mod convert;
 pub mod derived_escrow;
@@ -6,6 +7,7 @@ pub mod merkle;
 pub mod params;
 pub mod poseidon;
 pub mod stealth;
+pub mod swap_authorization;
 pub mod utils;
 
 pub use cryptography::{
@@ -112,6 +114,41 @@ pub fn generate_coin_for_deposit_with_owner_pub_hex(
     )
     .map_err(|e| JsValue::from_str(&e))?;
     serde_wasm_bindgen::to_value(&generated).map_err(|e| JsValue::from_str(&format!("{e}")))
+}
+
+/// Sign a swap authorization from the seller's notes.
+///
+/// Does not initialize an SDK session and does not load a proving key.
+/// `notes_json` is a JSON array of one to five withdrawal `CoinData` records.
+/// Amounts, the quote, and the expiration ledger are decimal integers.
+/// The sender asset is the asset of the proceeds note the seller receives.
+#[wasm_bindgen(js_name = "createSwapAuthorization")]
+pub fn create_swap_authorization_js(
+    spend_scalar_decimal: &str,
+    notes_json: &str,
+    sender_owner_x: &str,
+    sender_owner_y: &str,
+    sender_asset_hi: &str,
+    sender_asset_lo: &str,
+    quote_numerator: &str,
+    quote_denominator: &str,
+    swap_amount: &str,
+    expiration_ledger: &str,
+) -> Result<JsValue, JsValue> {
+    let authorization = swap_authorization::create_swap_authorization(
+        spend_scalar_decimal,
+        notes_json,
+        sender_owner_x,
+        sender_owner_y,
+        sender_asset_hi,
+        sender_asset_lo,
+        quote_numerator,
+        quote_denominator,
+        swap_amount,
+        expiration_ledger,
+    )
+    .map_err(|err| JsValue::from_str(&err))?;
+    serde_wasm_bindgen::to_value(&authorization).map_err(|err| JsValue::from_str(&format!("{err}")))
 }
 
 /// Merkle root, path, and coin field strings for the first withdraw leg (JSON → JSON).

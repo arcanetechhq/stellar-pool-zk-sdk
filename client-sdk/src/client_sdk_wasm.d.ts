@@ -31,6 +31,23 @@ declare module 'privacy-pool-client-sdk/pkg/client_sdk_wasm.js' {
     asset_lo_decimal: string,
     application_id_decimal: string,
   ): unknown;
+  /**
+   * Seller swap authorization. Does not load a proving key.
+   * `notes_json` is one to five withdrawal coin records.
+   * Every integer argument is a decimal string.
+   */
+  export function createSwapAuthorization(
+    spend_scalar_decimal: string,
+    notes_json: string,
+    sender_owner_x: string,
+    sender_owner_y: string,
+    sender_asset_hi: string,
+    sender_asset_lo: string,
+    quote_numerator: string,
+    quote_denominator: string,
+    swap_amount: string,
+    expiration_ledger: string,
+  ): unknown;
   export function buildWithdrawMerkleWitness(coin_json: string, state_json: string): string;
   export function importLeanImt(snapshot_json: string): number;
   export function importLeanImtFromState(state_json: string): number;
