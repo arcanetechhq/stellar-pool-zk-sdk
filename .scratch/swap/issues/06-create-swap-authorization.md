@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Exact swap witness is accepted
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] The authorization is created from the seller's notes, the sender's owner key, the quote, the swap amount, and the expiration ledger, without a proving key
 - [ ] The result includes the signature, `minimumSenderBalance` equal to the swap amount, `bPaid`, and the note opening of the proceeds note

@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Exact swap witness is accepted
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] A non-dividing quote yields `bPaid = floor(swapAmount × quoteNum / quoteDen)`, and `bPaid` is non-zero
 - [ ] The seller receives one proceeds note of the swap amount of the sender's asset and one change note of their own asset

@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Exact swap witness is accepted
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] A different opening in place of the seller's proceeds note fails the witness check
 - [ ] Spending a subset of the seller's authorized notes fails the witness check

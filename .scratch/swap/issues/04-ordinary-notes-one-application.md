@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Exact swap witness is accepted
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] An escrow note as an input or as an output fails the witness check
 - [ ] A note with a non-zero accumulator fails the witness check

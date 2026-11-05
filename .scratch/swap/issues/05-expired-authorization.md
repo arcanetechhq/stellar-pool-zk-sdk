@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Exact swap witness is accepted
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] A swap whose public expiration ledger is less than or equal to the current ledger is rejected, and no note is spent
 - [ ] A swap submitted on the named expiration ledger is rejected
