@@ -13,6 +13,8 @@ artifacts/
 
 # Demo state (contains keys and contract ids)
 demo_deploy_state.json
+scripts/testnet-swap/state/
+scripts/testnet-swap/vk-export/target/
 public_hex.txt
 proof_hex.txt
 withdrawal_input.json
