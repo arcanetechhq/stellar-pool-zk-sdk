@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] One non-zero note from the sender and one from the seller produce a witness that checks
 - [ ] The seller's only received note is worth the swap amount of the sender's asset, and its commitment is the one signed in the swap authorization
