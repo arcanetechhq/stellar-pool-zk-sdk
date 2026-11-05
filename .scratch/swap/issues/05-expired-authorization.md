@@ -6,7 +6,7 @@
 
 **Status:** claimed
 
-- [ ] A swap whose public expiration ledger is less than or equal to the current ledger is rejected, and no note is spent
-- [ ] A swap submitted on the named expiration ledger is rejected
-- [ ] An expiration ledger that does not fit in 32 bits is rejected
-- [ ] A swap whose expiration ledger is still ahead is accepted
+- [x] A swap whose public expiration ledger is less than or equal to the current ledger is rejected, and no note is spent
+- [x] A swap submitted on the named expiration ledger is rejected
+- [x] An expiration ledger that does not fit in 32 bits is rejected
+- [x] A swap whose expiration ledger is still ahead is accepted
