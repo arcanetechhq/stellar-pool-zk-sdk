@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — The swap authorization binds the parties, the notes, and the price; 04 — Only ordinary notes of one application id can be swapped; 07 — The sender can prove an exact swap
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] A substituted seller output, a subset of the seller's notes, a different sender key, the same asset on both sides, or a zero `bPaid` is refused before proving
 - [ ] An escrow note, a non-zero accumulator, or a mismatched application id is refused before proving

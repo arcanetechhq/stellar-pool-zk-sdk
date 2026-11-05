@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — Change and seller-favorable floor; 07 — The sender can prove an exact swap
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] `proveSwap` submits a swap with leftover value on both sides and a non-dividing quote, and the pool accepts it
 - [ ] The seller's two output notes are the openings returned with the swap authorization
