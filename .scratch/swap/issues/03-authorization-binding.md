@@ -1,6 +1,6 @@
-# 03: The swap authorization binds the parties, the notes, and the price
+# 03: The swap authorization binds the parties, the notes, and the quote
 
-**What to build:** A witness that does not match the swap authorization fails. The sender cannot replace the seller's payment, drop one of the seller's notes, use another owner key, swap an asset for itself, or pay a price that rounds to nothing.
+**What to build:** A witness that does not match the swap authorization fails. The sender cannot replace the seller's payment, drop one of the seller's notes, use another owner key, swap an asset for itself, or pay a quote that rounds to nothing.
 
 **Blocked by:** 01 — Exact swap witness is accepted
 

@@ -2,11 +2,11 @@ Status: ready-for-agent
 
 ## Problem Statement
 
-A sender and a seller want to exchange two shielded assets at an agreed quote. The seller must be able to authorize the exact notes, the price, the swap amount, and the expiration ledger without placing their spend scalar in the proof. The sender, who builds the proof, must not be able to withhold the notes the seller is paid: the seller has to hold those note openings before the proof exists.
+A sender and a seller want to exchange two shielded assets at an agreed quote. The seller must be able to authorize the exact notes, the quote, the swap amount, and the expiration ledger without placing their spend scalar in the proof. The sender, who builds the proof, must not be able to withhold the notes the seller is paid: the seller has to hold those note openings before the proof exists.
 
 ## Solution
 
-The seller signs a swap authorization over their input notes, the sender's owner key, both assets, the quote, the swap amount, the expiration ledger, and the commitments of the one or two notes the seller will receive. A new six-by-six swap transaction verifies that signature, moves the two assets at a seller-favorable integer price, and pays each party in ordinary notes. The pool rejects the transaction once the ledger reaches the expiration ledger. The sender proves with a new SDK method. The seller creates the authorization, and the openings of the notes they receive, with a separate method that does not load a proving key.
+The seller signs a swap authorization over their input notes, the sender's owner key, both assets, the quote, the swap amount, the expiration ledger, and the commitments of the one or two notes the seller will receive. A new six-by-six swap transaction verifies that signature, moves the two assets at a seller-favorable integer quote, and pays each party in ordinary notes. The pool rejects the transaction once the ledger reaches the expiration ledger. The sender proves with a new SDK method. The seller creates the authorization, and the openings of the notes they receive, with a separate method that does not load a proving key.
 
 ## User Stories
 
@@ -34,7 +34,7 @@ The seller signs a swap authorization over their input notes, the sender's owner
 22. As a seller, I want an empty set and a set of six notes rejected, so that the shape cannot be filled with only my notes.
 23. As a seller, I want each authorization to sample fresh nullifiers and ephemeral scalars for the notes I receive, so that two offers do not reuse one output note.
 24. As a seller, I want to keep the note openings and also hand them to the sender, so that the sender can place those exact notes in the proof.
-25. As a sender, I want to prove the swap after receiving my counterparty's input note openings, the swap authorization, and the openings of the notes the seller receives, so that I can fill an offer I did not sign.
+25. As a sender, I want to prove the swap after receiving the seller's input note openings, the swap authorization, and the openings of the notes the seller receives, so that I can fill an offer I did not sign.
 26. As a sender, I want my own notes spent with my spend scalar, so that my side of the swap uses the ordinary spend.
 27. As a sender, I want every non-zero input whose commitment is in the authorization to be treated as the seller's, so that I cannot spend the seller's note with my scalar.
 28. As a sender, I want every other non-zero input to be mine and to match the authorized sender key and sender asset, so that I cannot fund the swap with another asset or another key.
@@ -63,10 +63,10 @@ The seller signs a swap authorization over their input notes, the sender's owner
 51. As a pool, I want no pool address inside the authorization, so that a second pool that actually contains the same commitments may accept the same offer.
 52. As a pool, I want every output commitment inserted, including padding notes, so that a zero-value padding note is still a real leaf.
 53. As a pool, I want adjacent output commitments to be non-zero pairs, so that the pairwise tree insertion accepts the swap.
-54. As a sender, I want the swap amount of my asset transferred in full, so that my side of the price is not rounded.
+54. As a sender, I want the swap amount of my asset transferred in full, so that my side of the quote is not rounded.
 55. As a seller, I want to pay `floor(swapAmount × quoteNum / quoteDen)` of my asset, so that rounding favors me and every moved quantity is an integer.
 56. As a sender, I want a zero `bPaid` rejected, so that I cannot pay a swap amount and receive nothing.
-57. As a sender, I want a quote or a swap amount of zero rejected, so that an empty price cannot authorize a transfer.
+57. As a sender, I want a quote or a swap amount of zero rejected, so that an empty quote cannot authorize a transfer.
 58. As a sender, I want the product of the swap amount and the quote numerator constrained below `2^253`, and each of those inputs below `2^127`, so that the floor is integer division and not a wrap in the field.
 59. As a sender, I want each asset conserved, so that tokens cannot appear or disappear.
 60. As a sender, I want the fractional remainder of the division to stay with the seller as a smaller payment, so that the remainder is not minted and not burned.

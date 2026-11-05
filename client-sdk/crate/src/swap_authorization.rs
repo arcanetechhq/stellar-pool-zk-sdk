@@ -18,8 +18,6 @@ const BABYJUB_SUBGROUP_ORDER: &str =
 /// BN254 scalar field modulus.
 const FIELD_MODULUS: &str =
     "21888242871839275222246405745257275088548364400416034343698204186575808495617";
-/// EdDSA nonce. Fixed so the same authorization signs the same way.
-const SIGNATURE_NONCE: u64 = 9;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct Signature {
@@ -290,7 +288,7 @@ fn output_opening(
 }
 
 fn sign_poseidon(message: Fr, scalar: &BigUint) -> Result<Signature, String> {
-    let nonce = BigUint::from(SIGNATURE_NONCE);
+    let nonce = fresh_signature_nonce()?;
     let nonce_point = owner_point(&nonce)?;
     let owner = owner_point(scalar)?;
     let challenge = poseidon5([nonce_point.x, nonce_point.y, owner.x, owner.y, message]);
@@ -472,6 +470,9 @@ pub(crate) fn refuse_swap_proof(
     }
     if sender_notes.is_empty() {
         return Err("sender notes do not cover the minimum sender balance".to_string());
+    }
+    if seller_notes.len() > 5 || sender_notes.len() > 5 {
+        return Err("a swap accepts one to five notes on each side".to_string());
     }
     for note in seller_notes.iter().chain(sender_notes.iter()) {
         refuse_note_shape(&note.owner_mode, &note.accumulator, &note.escrow_nonce)?;
@@ -750,6 +751,21 @@ fn baby_mul(point: (Fr, Fr), scalar: &BigUint, bits: usize) -> Option<(Fr, Fr)> 
     Some(acc)
 }
 
+fn fresh_signature_nonce() -> Result<BigUint, String> {
+    let order =
+        BigUint::parse_bytes(BABYJUB_SUBGROUP_ORDER.as_bytes(), 10).expect("subgroup order");
+    for _ in 0..64 {
+        let mut bytes = [0u8; 32];
+        getrandom::getrandom(&mut bytes).map_err(|err| err.to_string())?;
+        bytes[0] &= 0x0f;
+        let nonce = BigUint::from_bytes_be(&bytes);
+        if !nonce.is_zero() && nonce < order {
+            return Ok(nonce);
+        }
+    }
+    Err("could not sample a signature nonce".to_string())
+}
+
 fn fresh_scalar() -> Result<Fr, String> {
     let mut bytes = [0u8; 32];
     getrandom::getrandom(&mut bytes).map_err(|err| err.to_string())?;
@@ -765,22 +781,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn two_signatures_from_one_scalar_do_not_share_a_nonce() {
+        let scalar = BigUint::from(424242u32);
+        let message = Fr::from(12345u64);
+        let first = sign_poseidon(message, &scalar).expect("signature");
+        let second = sign_poseidon(message, &scalar).expect("signature");
+        assert_ne!(first.r8, second.r8);
+        let owner = owner_point(&scalar).expect("owner");
+        verify_poseidon(message, &first, (owner.x, owner.y)).expect("first signature");
+        verify_poseidon(message, &second, (owner.x, owner.y)).expect("second signature");
+    }
+
+    #[test]
     fn signs_the_circomlib_eddsa_vector() {
         let signature =
             sign_poseidon(Fr::from(12345u64), &BigUint::from(424242u32)).expect("signature");
-        assert_eq!(
-            signature.r8,
-            [
-                "4705897243203718691035604313913899717760209962238015362153877735592901317263",
-                "11533909001000295577818857040682494493436124051895563619976413559559984357704",
-            ]
-        );
-        assert_eq!(
-            signature.s,
-            "358829666924093346893412930508875309967692793886401469120113378645357300984"
-        );
         let owner = owner_point(&BigUint::from(424242u32)).expect("owner");
-        verify_poseidon(Fr::from(12345u64), &signature, (owner.x, owner.y)).expect("verifies");
+        verify_poseidon(Fr::from(12345u64), &signature, (owner.x, owner.y)).expect("signature");
         let mut tampered = signature;
         tampered.s = "3".to_string();
         assert!(verify_poseidon(Fr::from(12345u64), &tampered, (owner.x, owner.y)).is_err());

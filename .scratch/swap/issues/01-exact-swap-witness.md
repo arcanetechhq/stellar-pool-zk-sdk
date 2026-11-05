@@ -8,6 +8,6 @@
 
 - [x] One non-zero note from the sender and one from the seller produce a witness that checks
 - [x] The seller's only received note is worth the swap amount of the sender's asset, and its commitment is the one signed in the swap authorization
-- [x] The sender receives `bPaid` of the seller's asset, and `bPaid` equals the exact rational price
+- [x] The sender receives `bPaid` of the seller's asset, and `bPaid` equals the exact rational quote
 - [x] The remaining slots are padding notes, and the public signals carry the tree root and a future expiration ledger
 - [x] The seller's spend scalar is not a witness input; the swap authorization signature verifies instead

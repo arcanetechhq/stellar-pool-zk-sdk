@@ -2,7 +2,7 @@
 
 **What to build:** The seller's authorization call and the sender's proof call refuse an offer that the swap circuit would reject, before a proof is built. A proof call on a transfer circuit is refused as well.
 
-**Blocked by:** 03 — The swap authorization binds the parties, the notes, and the price; 04 — Only ordinary notes of one application id can be swapped; 07 — The sender can prove an exact swap
+**Blocked by:** 03 — The swap authorization binds the parties, the notes, and the quote; 04 — Only ordinary notes of one application id can be swapped; 07 — The sender can prove an exact swap
 
 **Status:** claimed
 

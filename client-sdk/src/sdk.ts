@@ -489,15 +489,16 @@ export class PrivacyPoolSDK {
       params.senderSpendScalar ?? "",
       params.currentLedger ?? "",
     );
-    const senderWitness = this.buildWithdrawMerkleWitness(
-      params.senderNotes[0],
-      params.state,
+    const senderWitnesses = params.senderNotes.map((note) =>
+      this.buildWithdrawMerkleWitness(note, params.state),
     );
-    const sellerWitness = this.buildWithdrawMerkleWitness(
-      params.sellerNotes[0],
-      params.state,
+    const sellerWitnesses = params.sellerNotes.map((note) =>
+      this.buildWithdrawMerkleWitness(note, params.state),
     );
-    if (senderWitness.stateRoot !== sellerWitness.stateRoot) {
+    const stateRoots = [...senderWitnesses, ...sellerWitnesses].map(
+      (witness) => witness.stateRoot,
+    );
+    if (stateRoots.some((root) => root !== stateRoots[0])) {
       throw new Error("sender and seller notes are not in the same pool state");
     }
     const senderOwner = this.ownerPointFromSpendScalar(params.senderSpendScalar);
@@ -515,8 +516,8 @@ export class PrivacyPoolSDK {
       senderNotes: params.senderNotes,
       senderSpendScalar: params.senderSpendScalar,
       audit: params.audit,
-      senderWitness,
-      sellerWitness,
+      senderWitnesses,
+      sellerWitnesses,
       senderOwner,
       paddingOwner,
     };
