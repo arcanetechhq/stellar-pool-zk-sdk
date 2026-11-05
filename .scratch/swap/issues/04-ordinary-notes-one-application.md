@@ -6,7 +6,7 @@
 
 **Status:** claimed
 
-- [ ] An escrow note as an input or as an output fails the witness check
-- [ ] A note with a non-zero accumulator fails the witness check
-- [ ] A non-zero note whose application id differs from the others fails the witness check
-- [ ] An accepted swap's padding notes have application id zero, value zero, asset zero, and a throwaway owner key
+- [x] An escrow note as an input or as an output fails the witness check
+- [x] A note with a non-zero accumulator fails the witness check
+- [x] A non-zero note whose application id differs from the others fails the witness check
+- [x] An accepted swap's padding notes have application id zero, value zero, asset zero, and a throwaway owner key
