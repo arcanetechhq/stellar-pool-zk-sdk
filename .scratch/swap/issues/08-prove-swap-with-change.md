@@ -6,7 +6,7 @@
 
 **Status:** claimed
 
-- [ ] `proveSwap` submits a swap with leftover value on both sides and a non-dividing quote, and the pool accepts it
-- [ ] The seller's two output notes are the openings returned with the swap authorization
-- [ ] The sender receives `bPaid` of the seller's asset and one change note of their own asset
-- [ ] Input and output sums match for each asset
+- [x] `proveSwap` submits a swap with leftover value on both sides and a non-dividing quote, and the pool accepts it
+- [x] The seller's two output notes are the openings returned with the swap authorization
+- [x] The sender receives `bPaid` of the seller's asset and one change note of their own asset
+- [x] Input and output sums match for each asset

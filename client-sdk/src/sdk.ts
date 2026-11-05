@@ -70,6 +70,7 @@ import {
 } from "./zk-layout";
 import { encryptTransactionCiphertextBlob } from "./output-note-encryption";
 import {
+  buildChangeSwapWitnessInput,
   buildExactSwapWitnessInput,
   EXACT_SWAP_PADDING_SCALAR,
   type ProveSwapParams,
@@ -472,8 +473,8 @@ export class PrivacyPoolSDK {
   }
 
   /**
-   * Exact swap proof. The SDK must have been initialized for the swap circuit.
-   * The seller's proceeds note is the opening from the authorization.
+   * Swap proof. The SDK must have been initialized for the swap circuit.
+   * The seller's output notes are the openings from the authorization.
    */
   async proveSwap(params: ProveSwapParams): Promise<WithdrawResult> {
     if (!isSwapLayout(this.layout)) {
@@ -508,7 +509,7 @@ export class PrivacyPoolSDK {
     ) {
       throw new Error("padding note collided with a swap party");
     }
-    const witnessInput = buildExactSwapWitnessInput({
+    const witnessParameters = {
       authorization: params.authorization,
       sellerNotes: params.sellerNotes,
       senderNotes: params.senderNotes,
@@ -518,7 +519,11 @@ export class PrivacyPoolSDK {
       sellerWitness,
       senderOwner,
       paddingOwner,
-    });
+    };
+    const witnessInput =
+      params.authorization.noteOpenings?.length === 2
+        ? buildChangeSwapWitnessInput(witnessParameters)
+        : buildExactSwapWitnessInput(witnessParameters);
     if (params.witnessInputPath) {
       const fs = await import("fs");
       fs.writeFileSync(params.witnessInputPath, JSON.stringify(witnessInput));

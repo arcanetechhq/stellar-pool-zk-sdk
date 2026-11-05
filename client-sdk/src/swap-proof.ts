@@ -291,4 +291,198 @@ export function buildExactSwapWitnessInput(parameters: {
   };
 }
 
+/**
+ * Swap with leftover value. The seller's proceeds and change notes are the
+ * openings from the swap authorization. The sender receives bPaid of the
+ * seller's asset and one change note of their own asset.
+ */
+export function buildChangeSwapWitnessInput(parameters: {
+  authorization: SwapAuthorizationResult;
+  sellerNotes: CoinData[];
+  senderNotes: CoinData[];
+  senderSpendScalar: string;
+  audit: TransactionAuditParams;
+  senderWitness: WithdrawMerkleWitness;
+  sellerWitness: WithdrawMerkleWitness;
+  senderOwner: OwnerPoint;
+  paddingOwner: OwnerPoint;
+}): ExactSwapWitnessInput {
+  const { authorization, audit } = parameters;
+  if (parameters.senderNotes.length !== 1 || parameters.sellerNotes.length !== 1) {
+    throw new Error("a swap with change spends one note on each side");
+  }
+  if (authorization.noteOpenings?.length !== 2) {
+    throw new Error("a swap with change copies the proceeds opening and the change opening");
+  }
+  if (!audit?.noteAuditPublicKey || !audit.auditEphemeralScalar) {
+    throw new Error("proveSwap requires audit parameters");
+  }
+  const proceeds = authorization.noteOpenings[0];
+  const sellerChange = authorization.noteOpenings[1];
+  const senderNote = parameters.senderNotes[0];
+  const sellerNote = parameters.sellerNotes[0];
+  const quoteNum = signedField(authorization, 7, "quote numerator");
+  const quoteDen = signedField(authorization, 8, "quote denominator");
+  const swapAmount = signedField(authorization, 9, "swap amount");
+  const expirationLedger = signedField(authorization, 10, "expiration ledger");
+  const bPaid = authorization.bPaid;
+  if (typeof bPaid !== "string" || !/^[0-9]+$/.test(bPaid)) {
+    throw new Error("swap authorization is missing bPaid");
+  }
+  const product = BigInt(swapAmount) * BigInt(quoteNum);
+  const paid = BigInt(bPaid) * BigInt(quoteDen);
+  if (paid > product) {
+    throw new Error("bPaid does not match the quote");
+  }
+  const senderChange = BigInt(parameters.senderWitness.value) - BigInt(swapAmount);
+  const senderAsset: OwnerPoint = [
+    parameters.senderWitness.withdrawnAsset[0],
+    parameters.senderWitness.withdrawnAsset[1],
+  ];
+  const sellerAsset: OwnerPoint = [
+    parameters.sellerWitness.withdrawnAsset[0],
+    parameters.sellerWitness.withdrawnAsset[1],
+  ];
+  const sellerOwner: OwnerPoint = [proceeds.owner_x, proceeds.owner_y];
+  const padding = parameters.paddingOwner;
+  const applicationId = noteApplicationId(sellerNote);
+  const signature = authorization.signature;
+  if (!signature?.R8 || signature.R8.length !== 2 || !signature.S) {
+    throw new Error("swap authorization is missing its signature");
+  }
+
+  return {
+    stateRoot: parameters.senderWitness.stateRoot,
+    expirationLedger,
+    senderPrivKeyScalar: parameters.senderSpendScalar,
+    paddingPrivKeyScalars: [
+      PADDING_SPEND_SCALAR,
+      PADDING_SPEND_SCALAR,
+      PADDING_SPEND_SCALAR,
+      PADDING_SPEND_SCALAR,
+    ],
+    ownerPubs: [
+      parameters.senderOwner,
+      sellerOwner,
+      padding,
+      padding,
+      padding,
+      padding,
+    ],
+    paddingRandoms: [
+      randomFrDecimal(),
+      randomFrDecimal(),
+      randomFrDecimal(),
+      randomFrDecimal(),
+      randomFrDecimal(),
+      randomFrDecimal(),
+    ],
+    withdrawnValues: [
+      parameters.senderWitness.value,
+      parameters.sellerWitness.value,
+      ...zeros(4),
+    ],
+    withdrawnNullifiers: [
+      parameters.senderWitness.nullifier,
+      parameters.sellerWitness.nullifier,
+      randomFrDecimal(),
+      randomFrDecimal(),
+      randomFrDecimal(),
+      randomFrDecimal(),
+    ],
+    withdrawnSecrets: [
+      parameters.senderWitness.secret,
+      parameters.sellerWitness.secret,
+      "1",
+      "2",
+      "3",
+      "4",
+    ],
+    withdrawnAssets: [senderAsset, sellerAsset, ...zeroPoints(4)],
+    inputApplicationIds: [
+      noteApplicationId(senderNote),
+      applicationId,
+      ...zeros(4),
+    ],
+    withdrawnAccumulators: zeros(6),
+    withdrawnEscrowNonces: zeros(6),
+    inputRecipientStellar: zeroPoints(6),
+    stateSiblings: [
+      siblingsOf(parameters.senderWitness),
+      siblingsOf(parameters.sellerWitness),
+      zeros(TREE_DEPTH),
+      zeros(TREE_DEPTH),
+      zeros(TREE_DEPTH),
+      zeros(TREE_DEPTH),
+    ],
+    stateIndex: [
+      parameters.senderWitness.stateIndex,
+      parameters.sellerWitness.stateIndex,
+      ...zeros(4),
+    ],
+    depositedValues: [
+      proceeds.value,
+      bPaid,
+      sellerChange.value,
+      senderChange.toString(10),
+      ...zeros(2),
+    ],
+    depositedAssets: [
+      [proceeds.asset_hi, proceeds.asset_lo],
+      sellerAsset,
+      [sellerChange.asset_hi, sellerChange.asset_lo],
+      senderAsset,
+      ...zeroPoints(2),
+    ],
+    depositedNullifiers: [
+      proceeds.nullifier,
+      randomFrDecimal(),
+      sellerChange.nullifier,
+      randomFrDecimal(),
+      randomFrDecimal(),
+      randomFrDecimal(),
+    ],
+    outputApplicationIds: [
+      proceeds.application_id,
+      applicationId,
+      sellerChange.application_id,
+      noteApplicationId(senderNote),
+      ...zeros(2),
+    ],
+    depositedAccumulators: [
+      proceeds.accumulator,
+      "0",
+      sellerChange.accumulator,
+      ...zeros(3),
+    ],
+    depositedEphemeralKeyScalars: [
+      proceeds.ephemeral_key_scalar,
+      randomFrDecimal253(),
+      sellerChange.ephemeral_key_scalar,
+      randomFrDecimal253(),
+      randomFrDecimal253(),
+      randomFrDecimal253(),
+    ],
+    depositedRecipientPublicKeys: [
+      sellerOwner,
+      parameters.senderOwner,
+      [sellerChange.owner_x, sellerChange.owner_y],
+      parameters.senderOwner,
+      padding,
+      padding,
+    ],
+    depositedEscrowNonces: zeros(6),
+    outputRecipientStellar: zeroPoints(6),
+    quoteNum,
+    quoteDen,
+    swapAmount,
+    bPaid,
+    quoteRemainder: (product - paid).toString(10),
+    signatureR8: [signature.R8[0], signature.R8[1]],
+    signatureS: signature.S,
+    auditEphemeralScalar: audit.auditEphemeralScalar,
+    noteAuditPublicKey: audit.noteAuditPublicKey,
+  };
+}
+
 export const EXACT_SWAP_PADDING_SCALAR = PADDING_SPEND_SCALAR;
