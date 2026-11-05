@@ -6,7 +6,7 @@
 
 **Status:** claimed
 
-- [ ] A substituted seller output, a subset of the seller's notes, a different sender key, the same asset on both sides, or a zero `bPaid` is refused before proving
-- [ ] An escrow note, a non-zero accumulator, or a mismatched application id is refused before proving
-- [ ] `proveSwap` on an SDK initialized for a transfer circuit is refused
-- [ ] When a current ledger is supplied and it has reached the expiration ledger, proving does not start
+- [x] A substituted seller output, a subset of the seller's notes, a different sender key, the same asset on both sides, or a zero `bPaid` is refused before proving
+- [x] An escrow note, a non-zero accumulator, or a mismatched application id is refused before proving
+- [x] `proveSwap` on an SDK initialized for a transfer circuit is refused
+- [x] When a current ledger is supplied and it has reached the expiration ledger, proving does not start

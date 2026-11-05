@@ -48,6 +48,14 @@ declare module 'privacy-pool-client-sdk/pkg/client_sdk_wasm.js' {
     swap_amount: string,
     expiration_ledger: string,
   ): unknown;
+  /** Refuse a swap offer before a proof is built. `current_ledger` is empty when omitted. */
+  export function refuseSwapProof(
+    authorization_json: string,
+    seller_notes_json: string,
+    sender_notes_json: string,
+    sender_spend_scalar: string,
+    current_ledger: string,
+  ): void;
   export function buildWithdrawMerkleWitness(coin_json: string, state_json: string): string;
   export function importLeanImt(snapshot_json: string): number;
   export function importLeanImtFromState(state_json: string): number;

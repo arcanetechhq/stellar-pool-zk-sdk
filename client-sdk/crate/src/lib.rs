@@ -151,6 +151,25 @@ pub fn create_swap_authorization_js(
     serde_wasm_bindgen::to_value(&authorization).map_err(|err| JsValue::from_str(&format!("{err}")))
 }
 
+/// Refuse a swap offer the circuit would reject. Does not build a proof.
+#[wasm_bindgen(js_name = "refuseSwapProof")]
+pub fn refuse_swap_proof_js(
+    authorization_json: &str,
+    seller_notes_json: &str,
+    sender_notes_json: &str,
+    sender_spend_scalar: &str,
+    current_ledger: &str,
+) -> Result<(), JsValue> {
+    swap_authorization::refuse_swap_proof(
+        authorization_json,
+        seller_notes_json,
+        sender_notes_json,
+        sender_spend_scalar,
+        current_ledger,
+    )
+    .map_err(|err| JsValue::from_str(&err))
+}
+
 /// Merkle root, path, and coin field strings for the first withdraw leg (JSON → JSON).
 #[wasm_bindgen(js_name = "buildWithdrawMerkleWitness")]
 pub fn build_withdraw_merkle_witness_js(

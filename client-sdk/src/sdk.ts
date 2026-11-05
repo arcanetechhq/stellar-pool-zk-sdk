@@ -481,6 +481,13 @@ export class PrivacyPoolSDK {
         "proveSwap requires an SDK initialized for the swap circuit",
       );
     }
+    this.wasm.refuseSwapProof(
+      JSON.stringify(params.authorization ?? null),
+      JSON.stringify(params.sellerNotes ?? []),
+      JSON.stringify(params.senderNotes ?? []),
+      params.senderSpendScalar ?? "",
+      params.currentLedger ?? "",
+    );
     const senderWitness = this.buildWithdrawMerkleWitness(
       params.senderNotes[0],
       params.state,

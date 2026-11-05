@@ -37,6 +37,11 @@ export interface ProveSwapParams {
   senderSpendScalar: string;
   state: StateFile;
   audit: TransactionAuditParams;
+  /**
+   * When set, proving stops once this ledger has reached the expiration ledger.
+   * Omitted, the pool remains the authority on expiry.
+   */
+  currentLedger?: string;
   /** Acceptance harness writes the witness that was proved so snarkjs can check it. */
   witnessInputPath?: string;
 }
