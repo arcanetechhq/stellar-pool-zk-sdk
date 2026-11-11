@@ -119,6 +119,9 @@ if [[ "$PUBLIC_N_INPUTS" != "0" && "$NOTE_OUTPUT_LEN" -ge 7 ]]; then
     publicWithdrawalAccumulators"
 fi
 
+public_block="${public_block},
+    outcomes"
+
 cat >"$OUT" <<EOF
 pragma circom 2.2.0;
 

@@ -275,7 +275,8 @@ export function totalPublicSignals(layout: ZkLayoutParams): number {
     2 * layout.publicNOutputs +
     layout.publicNInputs +
     layout.publicNOutputs +
-    publicAccumulatorSlots(layout)
+    publicAccumulatorSlots(layout) +
+    layout.nIns
   );
 }
 
