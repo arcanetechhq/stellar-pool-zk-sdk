@@ -20,7 +20,7 @@ assert.equal(layout.nOuts, 6);
 assert.equal(layout.nAuditSlots, 12);
 assert.equal(layout.auditOffset, 24);
 assert.equal(layout.outputNoteOffset, 38);
-assert.equal(totalPublicSignals(layout), 64);
+assert.equal(totalPublicSignals(layout), 94);
 assert.deepEqual(layoutForKnownNonce(SIX_BY_SIX_BINDING_ZK_NONCE), layout);
 
 const audit = resolveTransactionAuditParams('101', undefined, 12);

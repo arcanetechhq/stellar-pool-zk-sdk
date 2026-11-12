@@ -18,7 +18,7 @@ assert.equal(layout.publicNOutputs, 1);
 assert.equal(layout.nAuditSlots, 11);
 assert.equal(layout.auditOffset, 13);
 assert.equal(layout.outputNoteOffset, 26);
-assert.equal(totalPublicSignals(layout), 47);
+assert.equal(totalPublicSignals(layout), 97);
 assert.deepEqual(layoutForKnownNonce(TEN_BY_ONE_ZK_NONCE), layout);
 assert.equal(TEN_BY_ONE_ZK_NONCE, 10n);
 assert.equal(circuitProfileFromName("10x1").nonce, TEN_BY_ONE_ZK_NONCE);

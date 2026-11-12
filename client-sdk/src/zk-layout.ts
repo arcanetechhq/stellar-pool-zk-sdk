@@ -267,7 +267,15 @@ export function publicAccumulatorSlots(layout: ZkLayoutParams): number {
   return ciphertextsInPublicSignals(layout) ? 0 : layout.publicNInputs;
 }
 
+function anchorsBranchPath(layout: ZkLayoutParams): boolean {
+  return (
+    !ciphertextsInPublicSignals(layout) &&
+    layout.noteOutputLen >= BINDING_NOTE_OUTPUT_LEN
+  );
+}
+
 export function totalPublicSignals(layout: ZkLayoutParams): number {
+  const trailing = anchorsBranchPath(layout) ? 6 * layout.nIns : layout.nIns;
   return (
     publicOutputsLen(layout) +
     layout.publicInputPrefixLen +
@@ -276,7 +284,7 @@ export function totalPublicSignals(layout: ZkLayoutParams): number {
     layout.publicNInputs +
     layout.publicNOutputs +
     publicAccumulatorSlots(layout) +
-    layout.nIns
+    trailing
   );
 }
 
